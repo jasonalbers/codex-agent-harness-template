@@ -22,6 +22,10 @@ For live runs, prefer `node .agent-harness/dist/cli.js agent start --project <na
 `node .agent-harness/dist/cli.js symphony run` directly. The project-aware wrapper resolves
 `GITHUB_REPO` and `LINEAR_PROJECT_SLUG` from `.agent-harness/config/projects.json`.
 
+Live runs are trusted local runner operations. The CLI passes Symphony's
+required unattended guardrail acknowledgement flag to the pinned upstream binary
+only after the local dry-run and readiness checks have completed.
+
 ## Current Boundary
 
 The upstream reference implementation is Linear-first. If a future project must

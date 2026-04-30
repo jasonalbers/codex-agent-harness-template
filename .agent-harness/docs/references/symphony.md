@@ -34,6 +34,8 @@ Symphony operation:
 - `node .agent-harness/dist/cli.js symphony bootstrap` - clone/build upstream Symphony locally.
 - `node .agent-harness/dist/cli.js symphony run` - generate runtime workflow and launch Symphony.
 - `node .agent-harness/dist/cli.js agent start` - project-aware wrapper for dry-run and live starts.
+- Live starts pass Symphony's required unattended guardrail acknowledgement flag
+  to the pinned upstream binary after harness readiness checks pass.
 
 Ignored local state:
 

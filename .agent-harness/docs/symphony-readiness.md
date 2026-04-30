@@ -10,6 +10,8 @@ Individual projects are ready for live Symphony-style runs only after their proj
 - `.agent-harness/WORKFLOW.md` exists as a Symphony-style workflow contract.
 - `.agent-harness/config/projects.example.json` supports multiple projects.
 - `node .agent-harness/dist/cli.js agent start` provides a project-aware dry-run and live entry point.
+- Live `agent start` passes the upstream Symphony unattended guardrail
+  acknowledgement flag after readiness checks pass.
 - `node .agent-harness/dist/cli.js symphony bootstrap` pins upstream Symphony through `SYMPHONY_REF`.
 - `.agent-harness/docs/templates/proof-of-work.template.md` defines proof format.
 - `.github/workflows/validate.yml` runs base validation.
