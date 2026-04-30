@@ -15,6 +15,10 @@ node .agent-harness/dist/cli.js agent start --project example-app --dry-run
 AGENT_DRY_RUN=false node .agent-harness/dist/cli.js agent start --project example-app
 ```
 
+Live `agent start` is the explicit trusted local runner entry point. After the
+readiness checks pass, it supplies Symphony's required unattended guardrail
+acknowledgement flag to the pinned upstream binary.
+
 ## Ordered Ready Issues
 
 If multiple promoted issues are set to `Ready for Agent`, `agent start` keeps

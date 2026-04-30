@@ -90,6 +90,7 @@ type ValidationResult = {
 
 const HARNESS_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PROJECT_ROOT = resolve(HARNESS_ROOT, "..");
+const SYMPHONY_UNATTENDED_GUARDRAIL_ACK = "--i-understand-that-this-will-be-running-without-the-usual-guardrails";
 const REQUIRED_FILES = [
   "README.md",
   "AGENTS.md",
@@ -1185,6 +1186,10 @@ function generateWorkflow(envValues: Record<string, string>): string {
   return out;
 }
 
+export function symphonyRunArgs(workflow: string, logsRoot: string, port: string): string[] {
+  return [workflow, "--logs-root", logsRoot, "--port", port, SYMPHONY_UNATTENDED_GUARDRAIL_ACK];
+}
+
 function symphonyRun(extraEnv: Record<string, string> = {}): number {
   const dotenv = loadDotenv();
   const merged = { ...dotenv, ...process.env, ...extraEnv } as Record<string, string>;
@@ -1203,10 +1208,11 @@ function symphonyRun(extraEnv: Record<string, string> = {}): number {
   const workflow = generateWorkflow(merged);
   const logsRoot = merged.SYMPHONY_LOGS_ROOT || join(symphonyRoot(), "logs");
   const port = merged.SYMPHONY_PORT || "4007";
+  const args = symphonyRunArgs(workflow, logsRoot, port);
   if (capture("mise", ["--version"]).code === 0) {
-    return run("mise", ["exec", "--", binary, workflow, "--logs-root", logsRoot, "--port", port], upstream, merged);
+    return run("mise", ["exec", "--", binary, ...args], upstream, merged);
   }
-  return run(binary, [workflow, "--logs-root", logsRoot, "--port", port], upstream, merged);
+  return run(binary, args, upstream, merged);
 }
 
 async function agentStart(flags: Record<string, string | boolean>): Promise<number> {

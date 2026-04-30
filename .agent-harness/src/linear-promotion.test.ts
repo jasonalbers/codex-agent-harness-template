@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -79,4 +79,15 @@ test("accepts GitHub CLI auth when GITHUB_TOKEN is not set", () => {
     ok: false,
     source: "gh auth token",
   });
+});
+
+test("passes Symphony unattended guardrail acknowledgement flag", () => {
+  assert.deepEqual(symphonyRunArgs("/tmp/workflow.md", "/tmp/logs", "4007"), [
+    "/tmp/workflow.md",
+    "--logs-root",
+    "/tmp/logs",
+    "--port",
+    "4007",
+    "--i-understand-that-this-will-be-running-without-the-usual-guardrails",
+  ]);
 });
