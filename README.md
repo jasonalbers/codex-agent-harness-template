@@ -1,7 +1,47 @@
-# codex-agent-harness-template
+# Codex Agent Harness Template
 
-A reusable public template for starting new projects with a built-in agent
-operating system.
+[![validate](https://github.com/jasonalbers/codex-agent-harness-template/actions/workflows/validate.yml/badge.svg)](https://github.com/jasonalbers/codex-agent-harness-template/actions/workflows/validate.yml)
+
+A GitHub template for turning ChatGPT-refined product ideas into reviewed
+Linear work that Codex can pick up, implement, verify, and turn into pull
+requests.
+
+The harness lives in `.agent-harness/`, so product code can stay at the repo
+root without colliding with agent workflow internals.
+
+## Who This Is For
+
+Use this template if you want:
+
+- ChatGPT web to refine raw ideas into durable Idea Packs.
+- Linear to hold reviewed, scoped implementation work.
+- Codex/Symphony to pick up only approved issues.
+- GitHub to store branches, pull requests, and proof of work.
+- A reusable agent operating model that can be copied into new projects.
+
+This is not a product framework. It is the workflow layer around a product repo.
+
+## Quick Start
+
+Click **Use this template** on GitHub, or open the
+[template generator](https://github.com/jasonalbers/codex-agent-harness-template/generate).
+
+In the new repository, install and validate the harness:
+
+```bash
+npm --prefix .agent-harness ci
+npm --prefix .agent-harness run build
+node .agent-harness/dist/cli.js validate repo
+```
+
+Create local config when you are ready to connect real services:
+
+```bash
+cp .agent-harness/.env.example .agent-harness/.env
+cp .agent-harness/config/projects.example.json .agent-harness/config/projects.json
+```
+
+Do not commit `.agent-harness/.env` or private project config.
 
 ## Starting From ChatGPT Web
 
@@ -11,47 +51,36 @@ Open ChatGPT web, attach the GitHub connector, select this repository, and paste
 Use this repo. Read AGENTS.md and start.
 ```
 
-The template keeps the harness in one hidden directory:
+ChatGPT web will route through `AGENTS.md`, read the ChatGPT role file, and
+start the idea-intake workflow instead of jumping into implementation.
 
-```text
-.agent-harness/
+## How Work Moves
+
+```mermaid
+flowchart LR
+  A["ChatGPT web idea session"] --> B["Idea Pack"]
+  B --> C["Harness intake compile"]
+  C --> D["Linear issue bundle"]
+  D --> E["Reviewed Ready for Agent issue"]
+  E --> F["Codex/Symphony run"]
+  F --> G["GitHub pull request"]
+  G --> H["Proof of work"]
 ```
 
-That keeps future product files clean. A new project can add its own app code,
-`package.json`, `src/`, `docs/`, database files, framework config, and product
-README without colliding with the harness internals.
+ChatGPT web is the product studio. The TypeScript CLI is the compiler and
+control surface. Linear is the work queue. Codex executes scoped work after the
+issue is clear.
 
 ## What This Gives You
 
-- One TypeScript CLI for the full flow from idea to Linear to agent work.
-- ChatGPT web idea refinement workflow.
-- Linear issue promotion.
-- Symphony-style Codex agent execution policy.
-- GitHub PR and review conventions.
-- UI/UX guidance for future AI/business-agent products.
+- A universal `AGENTS.md` role router for ChatGPT web, Codex, and future tools.
+- Role-specific behavior in `.agent-harness/roles/`.
+- Idea Pack validation, compilation, and Linear promotion.
+- Linear issue ordering for agent pickup.
+- Symphony-style Codex execution policy.
+- GitHub PR and proof-of-work conventions.
+- Template sync for safely pulling future harness updates into derived repos.
 - Validation, safety, and public-template hygiene checks.
-
-## Operating Model
-
-```text
-ChatGPT web conversation
-  -> Idea Pack
-  -> .agent-harness intake validation
-  -> compiled Linear issue bundle
-  -> Linear issues
-  -> reviewed agent-ready tasks
-  -> Codex/Symphony work
-  -> GitHub pull requests
-  -> proof of work
-```
-
-ChatGPT web is the high-reasoning product studio.
-
-The harness CLI is the compiler and control surface.
-
-Linear is the work queue.
-
-Codex agents execute only after work is clear.
 
 ## Repository Layout
 
@@ -250,9 +279,13 @@ Also confirm:
 - Useful GitHub topics are set:
   - `codex`
   - `agents`
+  - `ai-agents`
   - `agent-harness`
+  - `agentic-workflow`
+  - `automation`
   - `linear`
   - `symphony`
+  - `template`
   - `harness-engineering`
   - `agent-orchestration`
   - `developer-tools`
