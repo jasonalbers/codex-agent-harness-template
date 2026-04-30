@@ -8,9 +8,9 @@ test("verifies promoted Linear issues are unarchived and in the target project",
     identifier: "JAS-15",
     archivedAt: null,
     description: "## Source Idea\n\n## Idea Context\n\n## Notes For Agent",
-    project: { id: "project-id", slugId: "operator-os" },
+    project: { id: "project-id", slugId: "de2afd8fca7c" },
   }, {
-    projectSlug: "operator-os",
+    projectId: "project-id",
     description: "## Source Idea\n\n## Idea Context\n\n## Notes For Agent",
   });
 
@@ -25,12 +25,12 @@ test("rejects archived or hidden Linear promotion results", () => {
     description: "## Source Idea\n\n## Notes For Agent",
     project: { id: "project-id", slugId: "wrong-project" },
   }, {
-    projectSlug: "operator-os",
+    projectId: "expected-project-id",
     description: "## Source Idea\n\n## Idea Context\n\n## Notes For Agent",
   });
 
   assert.match(errors.join("\n"), /issue is archived/);
-  assert.match(errors.join("\n"), /project slug is wrong-project/);
+  assert.match(errors.join("\n"), /project id is project-id/);
   assert.match(errors.join("\n"), /description is missing marker ## Idea Context/);
 });
 

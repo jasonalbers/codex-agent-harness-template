@@ -626,13 +626,13 @@ function descriptionMarkers(description: string): string[] {
   return firstLine ? [firstLine] : [];
 }
 
-export function verifyCreatedLinearIssue(issue: CreatedLinearIssue, expected: { projectSlug: string; description: string }): string[] {
+export function verifyCreatedLinearIssue(issue: CreatedLinearIssue, expected: { projectId: string; description: string }): string[] {
   const label = issue.identifier || issue.title || issue.id || "unknown issue";
   const errors: string[] = [];
   if (!issue.id) errors.push(`${label}: missing Linear issue id`);
   if (issue.archivedAt) errors.push(`${label}: issue is archived at ${issue.archivedAt}`);
-  if (issue.project?.slugId !== expected.projectSlug) {
-    errors.push(`${label}: project slug is ${issue.project?.slugId || "missing"}, expected ${expected.projectSlug}`);
+  if (issue.project?.id !== expected.projectId) {
+    errors.push(`${label}: project id is ${issue.project?.id || "missing"}, expected ${expected.projectId}`);
   }
   const actualDescription = issue.description || "";
   for (const marker of descriptionMarkers(expected.description)) {
@@ -679,7 +679,7 @@ async function verifyLinearPromotion(apiKey: string, projectId: string, projectS
       }
     `, { id: createdIssue.id });
     const issue = result.data?.issue as CreatedLinearIssue | undefined;
-    errors.push(...verifyCreatedLinearIssue(issue ?? {}, { projectSlug, description: createdIssue.expectedDescription }));
+    errors.push(...verifyCreatedLinearIssue(issue ?? {}, { projectId, description: createdIssue.expectedDescription }));
     if (!projectIssueIds.has(createdIssue.id)) {
       errors.push(`${issue?.identifier || createdIssue.id}: issue does not appear in the target project's normal issue list`);
     }
