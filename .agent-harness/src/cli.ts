@@ -103,6 +103,11 @@ type AgentClaimResult = {
   stateIds?: Map<string, string>;
 };
 
+type LinearStateUpdateOptions = {
+  settleMs?: number;
+  settleAttempts?: number;
+};
+
 type ValidationResult = {
   ok: boolean;
   errors: string[];
@@ -1010,6 +1015,10 @@ function compactJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
 export function verifyLinearStateTransitionResult(result: {
   mutationIssue?: LinearIssueStateUpdateIssue | null;
   queryIssue?: LinearIssueStateUpdateIssue | null;
@@ -1164,32 +1173,60 @@ async function fetchAgentIssueByIdentifier(apiKey: string, projectSlug: string, 
   return { issue, stateIds: context.stateIds };
 }
 
-async function updateLinearIssueState(apiKey: string, issue: AgentOrderIssue, stateId: string, stateName: string): Promise<void> {
-  const mutationResult = await linearGraphql(apiKey, `
-    mutation UpdateAgentIssueState($id: String!, $input: IssueUpdateInput!) {
-      issueUpdate(id: $id, input: $input) { success issue { id identifier state { id name } } }
+async function updateLinearIssueState(apiKey: string, issue: AgentOrderIssue, stateId: string, stateName: string, options: LinearStateUpdateOptions = {}): Promise<void> {
+  const settleMs = options.settleMs ?? 0;
+  const settleAttempts = options.settleAttempts ?? 0;
+  let lastMutationResult: Record<string, any> | undefined;
+  let lastVerifiedIssue: LinearIssueStateUpdateIssue | undefined;
+  let lastErrors: string[] = [];
+
+  for (let attempt = 0; attempt <= settleAttempts; attempt += 1) {
+    if (attempt > 0 && settleMs > 0) await sleep(settleMs);
+
+    const mutationResult = await linearGraphql(apiKey, `
+      mutation UpdateAgentIssueState($id: String!, $input: IssueUpdateInput!) {
+        issueUpdate(id: $id, input: $input) { success issue { id identifier state { id name } } }
+      }
+    `, { id: issue.id, input: { stateId } });
+    lastMutationResult = mutationResult;
+    const mutation = mutationResult.data?.issueUpdate;
+    const verifiedIssue = await fetchLinearIssueForStateVerification(apiKey, issue.id);
+    lastVerifiedIssue = verifiedIssue;
+    const errors = verifyLinearStateTransitionResult({
+      mutationIssue: mutation?.issue,
+      queryIssue: verifiedIssue,
+      success: mutation?.success,
+    }, { issueId: issue.id, stateId, stateName });
+    lastErrors = errors;
+    if (errors.length > 0) continue;
+
+    if (settleMs > 0) {
+      await sleep(settleMs);
+      const settledIssue = await fetchLinearIssueForStateVerification(apiKey, issue.id);
+      lastVerifiedIssue = settledIssue;
+      const settleErrors = verifyLinearStateTransitionResult({
+        mutationIssue: mutation?.issue,
+        queryIssue: settledIssue,
+        success: mutation?.success,
+      }, { issueId: issue.id, stateId, stateName });
+      lastErrors = settleErrors;
+      if (settleErrors.length > 0) continue;
     }
-  `, { id: issue.id, input: { stateId } });
-  const mutation = mutationResult.data?.issueUpdate;
-  const verifiedIssue = await fetchLinearIssueForStateVerification(apiKey, issue.id);
-  const errors = verifyLinearStateTransitionResult({
-    mutationIssue: mutation?.issue,
-    queryIssue: verifiedIssue,
-    success: mutation?.success,
-  }, { issueId: issue.id, stateId, stateName });
-  if (errors.length > 0) {
-    throw new Error([
-      `Linear state update verification failed for ${issue.identifier} -> ${stateName}.`,
-      ...errors.map((error) => `- ${error}`),
-      "",
-      "Mutation response:",
-      compactJson(mutationResult),
-      "",
-      "Verification query issue:",
-      compactJson(verifiedIssue ?? null),
-    ].join("\n"));
+
+    console.log(`Updated issue state: ${issue.identifier} -> ${stateName}`);
+    return;
   }
-  console.log(`Updated issue state: ${issue.identifier} -> ${stateName}`);
+
+  throw new Error([
+    `Linear state update verification failed for ${issue.identifier} -> ${stateName}.`,
+    ...lastErrors.map((error) => `- ${error}`),
+    "",
+    "Mutation response:",
+    compactJson(lastMutationResult ?? null),
+    "",
+    "Verification query issue:",
+    compactJson(lastVerifiedIssue ?? null),
+  ].join("\n"));
 }
 
 async function addLinearIssueComment(apiKey: string, issue: AgentOrderIssue, body: string): Promise<void> {
@@ -1250,24 +1287,31 @@ function parentPublishStateTransitionFailureCommentBody(targetState: string, err
   ].join("\n");
 }
 
+export function requiredLinearStateId(stateIds: Map<string, string>, stateName: string): string {
+  const stateId = stateIds.get(stateName);
+  if (!stateId) throw new Error(`Linear state ${stateName} was not found for the issue team.`);
+  return stateId;
+}
+
 async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
-  const readyStateId = stateIds.get("Ready to Merge");
-  if (!readyStateId) {
-    throw new Error("Parent publish succeeded, but Linear state Ready to Merge was not found.");
-  }
-  await updateLinearIssueState(apiKey, issue, readyStateId, "Ready to Merge");
+  const readyStateId = requiredLinearStateId(stateIds, "Ready to Merge");
+  await updateLinearIssueState(apiKey, issue, readyStateId, "Ready to Merge", { settleMs: 2500, settleAttempts: 2 });
   await addLinearIssueComment(apiKey, issue, body);
 }
 
 async function markIssueBlocked(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
-  const blockedStateId = stateIds.get("Blocked");
-  if (!blockedStateId) {
+  try {
+    const blockedStateId = requiredLinearStateId(stateIds, "Blocked");
     await addLinearIssueComment(apiKey, issue, body);
-    console.error("Runner failed, but Linear state Blocked was not found.");
-    return;
+    await updateLinearIssueState(apiKey, issue, blockedStateId, "Blocked");
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("Linear state Blocked was not found")) {
+      await addLinearIssueComment(apiKey, issue, body);
+      console.error("Runner failed, but Linear state Blocked was not found.");
+      return;
+    }
+    throw error;
   }
-  await addLinearIssueComment(apiKey, issue, body);
-  await updateLinearIssueState(apiKey, issue, blockedStateId, "Blocked");
 }
 
 async function markIssueBlockedAfterStateTransitionFailure(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, targetState: string, error: unknown): Promise<void> {
