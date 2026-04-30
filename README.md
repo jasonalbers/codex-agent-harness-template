@@ -234,6 +234,10 @@ Preview an agent run:
 node .agent-harness/dist/cli.js agent start --project example-app --dry-run
 ```
 
+The dry run checks the publish path before claiming Linear work, including local
+`gh auth status`, a disposable workspace clone, branch creation, writable `.git`
+metadata, and `git push --dry-run`.
+
 Start live work only after Linear issues are reviewed and credentials are
 configured:
 

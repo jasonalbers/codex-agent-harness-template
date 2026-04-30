@@ -25,7 +25,9 @@ A project is live-ready when:
 - Required Linear statuses exist.
 - Required Linear labels exist.
 - `LINEAR_API_KEY` is set in the runtime environment.
-- `gh auth token` returns a GitHub token for local GitHub operations.
+- `gh auth status` passes for local GitHub operations.
+- `agent start --dry-run` publish preflight passes for repo clone, branch
+  creation, writable `.git` metadata, and remote push dry-run.
 - Codex auth is available at `~/.codex/auth.json`, or `CODEX_AUTH_FILE` points
   to the auth file.
 - Generated workflow uses current Codex app-server policy values:

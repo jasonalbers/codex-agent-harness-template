@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -308,9 +308,12 @@ function slugify(value: string): string {
 }
 
 function run(command: string, args: string[], cwd = PROJECT_ROOT, extraEnv: Record<string, string> = {}): number {
+  const childEnv = { ...process.env, ...extraEnv };
+  delete childEnv.GITHUB_TOKEN;
+  delete childEnv.GH_TOKEN;
   const result = spawnSync(command, args, {
     cwd,
-    env: { ...process.env, ...extraEnv },
+    env: childEnv,
     stdio: "inherit",
     shell: process.platform === "win32",
   });
@@ -351,14 +354,115 @@ export function codexAuthStatus(values: Record<string, string>, fileExists: (pat
 
 export function githubAuthStatus(
   _values: Record<string, string>,
-  runner: () => { code: number; output: string } = () => capture("gh", ["auth", "token"]),
-): { ok: boolean; source: string; token?: string } {
+  runner: () => { code: number; output: string } = () => {
+    const result = runQuiet("gh", ["auth", "status", "--hostname", "github.com"]);
+    return { code: result.ok ? 0 : 1, output: result.output };
+  },
+): { ok: boolean; source: string } {
   const result = runner();
-  const token = result.output.trim();
-  if (result.code === 0 && token) {
-    return { ok: true, source: "gh auth token", token };
+  if (result.code === 0) {
+    return { ok: true, source: "gh auth status" };
   }
-  return { ok: false, source: "gh auth token" };
+  return { ok: false, source: "gh auth status" };
+}
+
+type PublishPreflightResult = {
+  ok: boolean;
+  checked: string[];
+  blockers: string[];
+  workspace?: string;
+};
+
+function repoCloneUrl(repo: string): string {
+  if (/^(https?:\/\/|git@|ssh:\/\/)/.test(repo)) {
+    return repo;
+  }
+  return `git@github.com:${repo}.git`;
+}
+
+function runQuiet(command: string, args: string[], cwd = PROJECT_ROOT, extraEnv: Record<string, string> = {}): { ok: boolean; output: string } {
+  const childEnv = { ...process.env, ...extraEnv };
+  delete childEnv.GITHUB_TOKEN;
+  delete childEnv.GH_TOKEN;
+  const result = spawnSync(command, args, {
+    cwd,
+    env: childEnv,
+    encoding: "utf8",
+    shell: process.platform === "win32",
+  });
+  return {
+    ok: (result.status ?? 1) === 0,
+    output: `${result.stdout ?? ""}${result.stderr ?? ""}`.trim(),
+  };
+}
+
+export function publishPreflight(repo: string, workspaceRoot: string, envValues: Record<string, string> = {}): PublishPreflightResult {
+  const checked: string[] = [];
+  const blockers: string[] = [];
+  if (!repo || isPlaceholder(repo)) {
+    return { ok: false, checked, blockers: ["project repo is missing or a placeholder"] };
+  }
+  if (!workspaceRoot) {
+    return { ok: false, checked, blockers: ["AGENT_WORKSPACE_ROOT is not set"] };
+  }
+  if (!existsSync(workspaceRoot)) {
+    return { ok: false, checked, blockers: [`AGENT_WORKSPACE_ROOT does not exist: ${workspaceRoot}`] };
+  }
+  if (!statSync(workspaceRoot).isDirectory()) {
+    return { ok: false, checked, blockers: [`AGENT_WORKSPACE_ROOT is not a directory: ${workspaceRoot}`] };
+  }
+
+  const gitVersion = runQuiet("git", ["--version"], PROJECT_ROOT, envValues);
+  if (!gitVersion.ok) blockers.push("git is not available to the local runner environment");
+  else checked.push("git is available");
+
+  const ghStatus = runQuiet("gh", ["auth", "status", "--hostname", "github.com"], PROJECT_ROOT, envValues);
+  if (!ghStatus.ok) blockers.push("GitHub CLI auth is not available to the local runner environment");
+  else checked.push("gh auth is available");
+
+  const ghRepo = runQuiet("gh", ["repo", "view", repo, "--json", "nameWithOwner"], PROJECT_ROOT, envValues);
+  if (!ghRepo.ok) blockers.push(`GitHub CLI cannot read repo ${repo}`);
+  else checked.push(`gh can read ${repo}`);
+
+  if (blockers.length > 0) {
+    return { ok: false, checked, blockers };
+  }
+
+  const probeDir = mkdtempSync(join(workspaceRoot, ".publish-preflight-"));
+  const branchName = `codex/preflight-${Date.now()}`;
+  try {
+    const clone = runQuiet("git", ["clone", "--depth", "1", repoCloneUrl(repo), "."], probeDir, envValues);
+    if (!clone.ok) blockers.push(`git clone failed for ${repo}`);
+    else checked.push("workspace clone succeeded");
+
+    if (clone.ok) {
+      const gitDir = join(probeDir, ".git");
+      const gitWritableProbe = join(gitDir, "agent-harness-write-test");
+      try {
+        writeFileSync(gitWritableProbe, "ok\n", "utf8");
+        rmSync(gitWritableProbe, { force: true });
+        checked.push(".git metadata is writable");
+      } catch {
+        blockers.push("local .git metadata is not writable in the agent workspace");
+      }
+    }
+
+    if (clone.ok) {
+      const branch = runQuiet("git", ["switch", "-c", branchName], probeDir, envValues);
+      if (!branch.ok) blockers.push("git cannot create a local publish branch in the agent workspace");
+      else checked.push("local publish branch can be created");
+    }
+
+    if (clone.ok) {
+      const dryPush = runQuiet("git", ["push", "--dry-run", "origin", `HEAD:refs/heads/${branchName}`], probeDir, envValues);
+      if (!dryPush.ok) blockers.push("git cannot push a publish branch to the target repo in dry-run mode");
+      else checked.push("remote publish branch dry-run succeeded");
+    }
+  } finally {
+    rmSync(probeDir, { recursive: true, force: true });
+  }
+
+  return { ok: blockers.length === 0, checked, blockers, workspace: workspaceRoot };
 }
 
 function validateEnv(flags: Record<string, string | boolean>): number {
@@ -398,9 +502,9 @@ function validateEnv(flags: Record<string, string | boolean>): number {
   const githubAuth = githubAuthStatus(merged);
   if (strict && !githubAuth.ok) {
     missing.push("GH_AUTH");
-    printCheck(false, "GitHub auth is required from gh auth token");
+    printCheck(false, "GitHub auth is required from gh auth status");
   } else {
-    printCheck(true, `GitHub auth ${githubAuth.ok ? `available from ${githubAuth.source}` : "not available from gh auth token; acceptable in dry-run mode"}`);
+    printCheck(true, `GitHub auth ${githubAuth.ok ? `available from ${githubAuth.source}` : "not available from gh auth status; acceptable in dry-run mode"}`);
   }
 
   if (missing.length > 0) {
@@ -601,7 +705,7 @@ function summarizeProjects(): number {
     for (const name of envRequirements) {
       if (!env(name, dotenv)) missing.push(name);
     }
-    if (!githubAuth.ok) missing.push("gh auth token");
+    if (!githubAuth.ok) missing.push("gh auth status");
     console.log("");
     console.log(`${project.name}:`);
     console.log(`  repo: ${project.repo}`);
@@ -1355,6 +1459,8 @@ export function symphonyRunArgs(workflow: string, logsRoot: string, port: string
 function symphonyRun(extraEnv: Record<string, string> = {}): number {
   const dotenv = loadDotenv();
   const merged = { ...dotenv, ...process.env, ...extraEnv } as Record<string, string>;
+  delete merged.GITHUB_TOKEN;
+  delete merged.GH_TOKEN;
   for (const name of ["LINEAR_API_KEY", "LINEAR_PROJECT_SLUG", "GITHUB_REPO"]) {
     if (!merged[name]) {
       console.error(`${name} is required.`);
@@ -1412,11 +1518,17 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const codexAuth = codexAuthStatus(mergedEnv);
   if (!codexAuth.ok) blockers.push(`Codex auth file is not available at ${codexAuth.source}`);
   const githubAuth = githubAuthStatus(mergedEnv);
-  if (!githubAuth.ok) blockers.push("GitHub auth is not available from gh auth token");
+  if (!githubAuth.ok) blockers.push("GitHub auth is not available from gh auth status");
+  const workspaceRoot = env("AGENT_WORKSPACE_ROOT", dotenv);
+  const publishCheck = blockers.length === 0 || workspaceRoot
+    ? publishPreflight(project.repo, workspaceRoot, mergedEnv)
+    : { ok: false, checked: [], blockers: [] };
+  for (const blocker of publishCheck.blockers) {
+    blockers.push(`publish preflight: ${blocker}`);
+  }
   const runEnv = {
     LINEAR_PROJECT_SLUG: project.linear_project_slug,
     GITHUB_REPO: project.repo,
-    ...(githubAuth.token ? { GITHUB_TOKEN: githubAuth.token } : {}),
     CODEX_MODEL: env("CODEX_MODEL", dotenv) || "gpt-5.5",
     CODEX_APPROVAL_POLICY: env("CODEX_APPROVAL_POLICY", dotenv) || "never",
     AGENT_MAX_PARALLEL_RUNS: env("AGENT_MAX_PARALLEL_RUNS", dotenv) || "1",
@@ -1435,6 +1547,8 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     console.log(`- CODEX_MODEL: ${runEnv.CODEX_MODEL}`);
     console.log(`- CODEX_APPROVAL_POLICY: ${runEnv.CODEX_APPROVAL_POLICY}`);
     console.log(`- AGENT_MAX_PARALLEL_RUNS: ${runEnv.AGENT_MAX_PARALLEL_RUNS}`);
+    console.log(`- Publish preflight: ${publishCheck.ok ? "passed" : "failed"}`);
+    publishCheck.checked.forEach((check) => console.log(`  - ${check}`));
     console.log("- Secrets: not printed");
     if (blockers.length > 0) {
       console.log("Readiness blockers:");

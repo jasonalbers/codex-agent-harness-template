@@ -6,8 +6,8 @@ Each configured project needs:
 
 - Repository name in `owner/name` form.
 - Default branch.
-- GitHub CLI authentication for local operations. The harness reads GitHub auth
-  from `gh auth token`; do not add `GITHUB_TOKEN` to `.agent-harness/.env`.
+- GitHub CLI authentication for local publish operations. The harness checks
+  `gh auth status`; do not add `GITHUB_TOKEN` to `.agent-harness/.env`.
 - PR template and CI validation in the target repo when possible.
 
 ## Validate
@@ -16,6 +16,10 @@ Each configured project needs:
 gh auth status
 node .agent-harness/dist/cli.js project summary
 ```
+
+`agent start --dry-run` also runs a disposable publish preflight under
+`AGENT_WORKSPACE_ROOT`. It verifies the target repo can be read, cloned, branched
+locally, and pushed in `--dry-run` mode before any Linear issue is claimed.
 
 ## Public Template Settings
 
