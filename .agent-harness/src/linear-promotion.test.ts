@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, requiredLinearStateId, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -166,6 +166,13 @@ test("rejects Linear state update when mutation returns wrong issue or wrong sta
   assert.match(errors.join("\n"), /did not report success=true/);
   assert.match(errors.join("\n"), /returned issue id other-issue-id/);
   assert.match(errors.join("\n"), /returned state In Progress/);
+});
+
+test("reports a clear setup blocker when requested Linear state is missing", () => {
+  assert.throws(
+    () => requiredLinearStateId(new Map([["In Progress", "state-id"]]), "Ready to Merge"),
+    /Linear state Ready to Merge was not found/,
+  );
 });
 
 test("passes Symphony unattended guardrail acknowledgement flag", () => {
