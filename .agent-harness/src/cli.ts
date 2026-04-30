@@ -65,6 +65,15 @@ type CreatedLinearIssue = {
   } | null;
 };
 
+type LinearIssueStateUpdateIssue = {
+  id?: string | null;
+  identifier?: string | null;
+  state?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+};
+
 export type AgentOrderIssue = {
   id: string;
   identifier: string;
@@ -983,6 +992,45 @@ async function linearGraphql(apiKey: string, query: string, variables: Record<st
   return body;
 }
 
+function compactJson(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+export function verifyLinearStateTransitionResult(result: {
+  mutationIssue?: LinearIssueStateUpdateIssue | null;
+  queryIssue?: LinearIssueStateUpdateIssue | null;
+  success?: boolean | null;
+}, expected: { issueId: string; stateId: string; stateName: string }): string[] {
+  const errors: string[] = [];
+  if (result.success !== true) errors.push("Linear issueUpdate did not report success=true");
+  if (!result.mutationIssue?.id) {
+    errors.push("Linear issueUpdate did not return an issue");
+  } else if (result.mutationIssue.id !== expected.issueId) {
+    errors.push(`Linear issueUpdate returned issue id ${result.mutationIssue.id}, expected ${expected.issueId}`);
+  }
+  if (result.mutationIssue?.state?.id !== expected.stateId || result.mutationIssue?.state?.name !== expected.stateName) {
+    errors.push(`Linear issueUpdate returned state ${result.mutationIssue?.state?.name || "missing"} (${result.mutationIssue?.state?.id || "missing"}), expected ${expected.stateName} (${expected.stateId})`);
+  }
+  if (!result.queryIssue?.id) {
+    errors.push("Linear verification query did not return an issue");
+  } else if (result.queryIssue.id !== expected.issueId) {
+    errors.push(`Linear verification query returned issue id ${result.queryIssue.id}, expected ${expected.issueId}`);
+  }
+  if (result.queryIssue?.state?.id !== expected.stateId || result.queryIssue?.state?.name !== expected.stateName) {
+    errors.push(`Linear verification query returned state ${result.queryIssue?.state?.name || "missing"} (${result.queryIssue?.state?.id || "missing"}), expected ${expected.stateName} (${expected.stateId})`);
+  }
+  return errors;
+}
+
+async function fetchLinearIssueForStateVerification(apiKey: string, issueId: string): Promise<LinearIssueStateUpdateIssue | undefined> {
+  const result = await linearGraphql(apiKey, `
+    query VerifyAgentIssueState($id: String!) {
+      issue(id: $id) { id identifier state { id name } }
+    }
+  `, { id: issueId });
+  return result.data?.issue;
+}
+
 function descriptionMarkers(description: string): string[] {
   const headings = [...description.matchAll(/^##\s+.+$/gm)].map((match) => match[0].trim());
   if (headings.length > 0) return headings;
@@ -1103,11 +1151,30 @@ async function fetchAgentIssueByIdentifier(apiKey: string, projectSlug: string, 
 }
 
 async function updateLinearIssueState(apiKey: string, issue: AgentOrderIssue, stateId: string, stateName: string): Promise<void> {
-  await linearGraphql(apiKey, `
+  const mutationResult = await linearGraphql(apiKey, `
     mutation UpdateAgentIssueState($id: String!, $input: IssueUpdateInput!) {
-      issueUpdate(id: $id, input: $input) { success issue { identifier state { name } } }
+      issueUpdate(id: $id, input: $input) { success issue { id identifier state { id name } } }
     }
   `, { id: issue.id, input: { stateId } });
+  const mutation = mutationResult.data?.issueUpdate;
+  const verifiedIssue = await fetchLinearIssueForStateVerification(apiKey, issue.id);
+  const errors = verifyLinearStateTransitionResult({
+    mutationIssue: mutation?.issue,
+    queryIssue: verifiedIssue,
+    success: mutation?.success,
+  }, { issueId: issue.id, stateId, stateName });
+  if (errors.length > 0) {
+    throw new Error([
+      `Linear state update verification failed for ${issue.identifier} -> ${stateName}.`,
+      ...errors.map((error) => `- ${error}`),
+      "",
+      "Mutation response:",
+      compactJson(mutationResult),
+      "",
+      "Verification query issue:",
+      compactJson(verifiedIssue ?? null),
+    ].join("\n"));
+  }
   console.log(`Updated issue state: ${issue.identifier} -> ${stateName}`);
 }
 
@@ -1152,11 +1219,27 @@ function parentPublishSkippedCommentBody(result: ParentPublishResult): string {
   ].join("\n");
 }
 
+function parentPublishStateTransitionFailureCommentBody(targetState: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return [
+    "Parent CLI publish completed, but Linear state transition verification failed.",
+    "",
+    `Target state: \`${targetState}\``,
+    "",
+    "The branch and pull request may already exist. The issue was not reported as complete because Linear did not confirm the expected state.",
+    "",
+    "Error:",
+    "",
+    "```text",
+    message,
+    "```",
+  ].join("\n");
+}
+
 async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
   const readyStateId = stateIds.get("Ready to Merge");
   if (!readyStateId) {
-    console.error("Parent publish succeeded, but Linear state Ready to Merge was not found.");
-    return;
+    throw new Error("Parent publish succeeded, but Linear state Ready to Merge was not found.");
   }
   await updateLinearIssueState(apiKey, issue, readyStateId, "Ready to Merge");
   await addLinearIssueComment(apiKey, issue, body);
@@ -1165,11 +1248,28 @@ async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, sta
 async function markIssueBlocked(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
   const blockedStateId = stateIds.get("Blocked");
   if (!blockedStateId) {
+    await addLinearIssueComment(apiKey, issue, body);
     console.error("Runner failed, but Linear state Blocked was not found.");
     return;
   }
-  await updateLinearIssueState(apiKey, issue, blockedStateId, "Blocked");
   await addLinearIssueComment(apiKey, issue, body);
+  await updateLinearIssueState(apiKey, issue, blockedStateId, "Blocked");
+}
+
+async function markIssueBlockedAfterStateTransitionFailure(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, targetState: string, error: unknown): Promise<void> {
+  const body = parentPublishStateTransitionFailureCommentBody(targetState, error);
+  try {
+    await markIssueBlocked(apiKey, issue, stateIds, body);
+  } catch (blockError) {
+    const message = blockError instanceof Error ? blockError.message : String(blockError);
+    console.error(`Failed to move ${issue.identifier} to Blocked after ${targetState} transition failure: ${message}`);
+    try {
+      await addLinearIssueComment(apiKey, issue, body);
+    } catch (commentError) {
+      const commentMessage = commentError instanceof Error ? commentError.message : String(commentError);
+      console.error(`Failed to add Linear blocker comment to ${issue.identifier}: ${commentMessage}`);
+    }
+  }
 }
 
 async function enforceAgentIssueOrder(apiKey: string, projectSlug: string, holdStateName: string, inProgressStateName: string): Promise<AgentClaimResult> {
@@ -1792,8 +1892,15 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   if (claim.selected && claim.stateIds) {
     const publishResult = parentPublishWorkspace(project, claim.selected, runEnv.AGENT_WORKSPACE_ROOT);
     if (publishResult.ok && !publishResult.skipped) {
-      await markIssueReadyToMerge(apiKey, claim.selected, claim.stateIds, parentPublishCommentBody(publishResult));
-      return 0;
+      try {
+        await markIssueReadyToMerge(apiKey, claim.selected, claim.stateIds, parentPublishCommentBody(publishResult));
+        return 0;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(message);
+        await markIssueBlockedAfterStateTransitionFailure(apiKey, claim.selected, claim.stateIds, "Ready to Merge", error);
+        return 1;
+      }
     }
     if (publishResult.ok && publishResult.skipped) {
       await markIssueBlocked(apiKey, claim.selected, claim.stateIds, parentPublishSkippedCommentBody(publishResult));
@@ -1865,8 +1972,15 @@ async function agentPublish(flags: Record<string, string | boolean>): Promise<nu
   }
   console.log(`Published ${issueResult.issue.identifier} on ${publishResult.branch}`);
   if (publishResult.prUrl) console.log(`Pull request: ${publishResult.prUrl}`);
-  await markIssueReadyToMerge(apiKey, issueResult.issue, issueResult.stateIds, parentPublishCommentBody(publishResult));
-  return 0;
+  try {
+    await markIssueReadyToMerge(apiKey, issueResult.issue, issueResult.stateIds, parentPublishCommentBody(publishResult));
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    await markIssueBlockedAfterStateTransitionFailure(apiKey, issueResult.issue, issueResult.stateIds, "Ready to Merge", error);
+    return 1;
+  }
 }
 
 async function main(): Promise<number> {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -98,6 +98,74 @@ test("formats parent-published agent branch names", () => {
     identifier: "JAS-47",
     title: "Define Operator OS Wave 1 product boundary",
   }), "agent/jas-47-define-operator-os-wave-1-product-boundary");
+});
+
+test("verifies successful publish lifecycle state transition before logging success", () => {
+  const errors = verifyLinearStateTransitionResult({
+    success: true,
+    mutationIssue: {
+      id: "issue-id",
+      identifier: "JAS-50",
+      state: { id: "ready-state-id", name: "Ready to Merge" },
+    },
+    queryIssue: {
+      id: "issue-id",
+      identifier: "JAS-50",
+      state: { id: "ready-state-id", name: "Ready to Merge" },
+    },
+  }, {
+    issueId: "issue-id",
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+  });
+
+  assert.deepEqual(errors, []);
+});
+
+test("rejects Linear state update success when verification still sees the old state", () => {
+  const errors = verifyLinearStateTransitionResult({
+    success: true,
+    mutationIssue: {
+      id: "issue-id",
+      identifier: "JAS-50",
+      state: { id: "ready-state-id", name: "Ready to Merge" },
+    },
+    queryIssue: {
+      id: "issue-id",
+      identifier: "JAS-50",
+      state: { id: "in-progress-state-id", name: "In Progress" },
+    },
+  }, {
+    issueId: "issue-id",
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+  });
+
+  assert.match(errors.join("\n"), /verification query returned state In Progress/);
+});
+
+test("rejects Linear state update when mutation returns wrong issue or wrong state", () => {
+  const errors = verifyLinearStateTransitionResult({
+    success: false,
+    mutationIssue: {
+      id: "other-issue-id",
+      identifier: "JAS-51",
+      state: { id: "in-progress-state-id", name: "In Progress" },
+    },
+    queryIssue: {
+      id: "issue-id",
+      identifier: "JAS-50",
+      state: { id: "in-progress-state-id", name: "In Progress" },
+    },
+  }, {
+    issueId: "issue-id",
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+  });
+
+  assert.match(errors.join("\n"), /did not report success=true/);
+  assert.match(errors.join("\n"), /returned issue id other-issue-id/);
+  assert.match(errors.join("\n"), /returned state In Progress/);
 });
 
 test("passes Symphony unattended guardrail acknowledgement flag", () => {
