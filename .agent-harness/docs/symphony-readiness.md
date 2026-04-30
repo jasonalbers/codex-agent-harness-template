@@ -23,7 +23,7 @@ A project is live-ready when:
 - Required Linear statuses exist.
 - Required Linear labels exist.
 - `LINEAR_API_KEY` is set in the runtime environment.
-- `GITHUB_TOKEN` is set in the runtime environment.
+- `gh auth token` returns a GitHub token for local GitHub operations.
 - Codex auth is available at `~/.codex/auth.json`, or `CODEX_AUTH_FILE` points
   to the auth file.
 - `AGENT_WORKSPACE_ROOT` points outside the source checkout.
