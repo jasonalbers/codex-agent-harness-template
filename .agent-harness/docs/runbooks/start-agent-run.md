@@ -14,3 +14,15 @@ node .agent-harness/dist/cli.js agent start --project example-app --dry-run
 ```bash
 AGENT_DRY_RUN=false node .agent-harness/dist/cli.js agent start --project example-app
 ```
+
+## Ordered Ready Issues
+
+If multiple promoted issues are set to `Ready for Agent`, `agent start` keeps
+the lowest `Agent Execution Order` issue ready and moves later ready issues back
+to `Todo` before starting the runner.
+
+Use a different hold state when needed:
+
+```bash
+AGENT_DRY_RUN=false node .agent-harness/dist/cli.js agent start --project example-app --hold-state "Needs Human Review"
+```
