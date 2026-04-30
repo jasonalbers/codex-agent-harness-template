@@ -32,6 +32,10 @@ host environment: it creates the branch, commits publishable changes, pushes,
 opens the pull request, comments on Linear, and moves the issue to
 `Ready to Merge`.
 
+The worker is intentionally limited to one Codex turn. That turn may include
+many tool calls, but when it exits the parent CLI must regain control for
+publish and lifecycle updates.
+
 ## Ordered Ready Issues
 
 If multiple promoted issues are set to `Ready for Agent`, `agent start` keeps

@@ -1142,6 +1142,16 @@ function parentPublishCommentBody(result: ParentPublishResult): string {
   ].join("\n");
 }
 
+function parentPublishSkippedCommentBody(result: ParentPublishResult): string {
+  return [
+    "Agent runner returned control to the parent CLI, but no publishable workspace changes were found.",
+    "",
+    result.message,
+    "",
+    "The issue was moved to `Blocked` so a human can inspect the workspace and decide whether to retry, revise the issue, or close it.",
+  ].join("\n");
+}
+
 async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
   const readyStateId = stateIds.get("Ready to Merge");
   if (!readyStateId) {
@@ -1732,6 +1742,10 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     if (publishResult.ok && !publishResult.skipped) {
       await markIssueReadyToMerge(apiKey, claim.selected, claim.stateIds, parentPublishCommentBody(publishResult));
       return 0;
+    }
+    if (publishResult.ok && publishResult.skipped) {
+      await markIssueBlocked(apiKey, claim.selected, claim.stateIds, parentPublishSkippedCommentBody(publishResult));
+      return 1;
     }
     if (runCode !== 0) {
       const body = publishResult.ok

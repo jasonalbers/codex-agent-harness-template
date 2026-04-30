@@ -21,7 +21,7 @@ hooks:
     git clone --depth 1 "git@github.com:__GITHUB_REPO__.git" .
 agent:
   max_concurrent_agents: __AGENT_MAX_PARALLEL_RUNS__
-  max_turns: 12
+  max_turns: 1
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="__CODEX_MODEL__"' --config model_reasoning_effort=high app-server
   approval_policy: __CODEX_APPROVAL_POLICY__

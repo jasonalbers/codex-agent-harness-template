@@ -33,3 +33,8 @@ The normal user handoff is only `Backlog` or `Todo` to `Ready for Agent`. After
 that, Codex/Symphony owns implementation and verification, while the parent CLI
 owns branch creation, commit, PR handling, status movement, and blocked/error
 reporting from the verified host environment.
+
+The Symphony worker is configured for one Codex turn per issue. A Codex turn can
+run many local tool calls, so the worker should finish implementation and
+verification before it ends the turn. After that turn exits, the parent CLI
+inspects the workspace and publishes the result.
