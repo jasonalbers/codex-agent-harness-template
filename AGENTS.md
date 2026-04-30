@@ -2,56 +2,32 @@
 
 This project includes a reusable agent harness in `.agent-harness/`.
 
-## ChatGPT Web Startup
+`AGENTS.md` is the universal entry point for ChatGPT web, Codex, and future
+agents. Tools must identify their operating role before doing work, then follow
+the matching role file.
 
-When this repository is used from ChatGPT web with the GitHub connector:
+## Role Handshake
 
-1. Read this file first.
-2. Read `.agent-harness/docs/intake/chatgpt-workshop.md`.
-3. Read `.agent-harness/docs/intake/idea-pack-format.md`.
-4. Read `.agent-harness/docs/intake/refinement-stages.md`.
-5. Read `.agent-harness/docs/intake/linear-promotion-rules.md`.
-6. Read `.agent-harness/docs/templates/idea-pack.template.md`.
-7. Read `.agent-harness/docs/UI_UX.md`.
-8. Start the idea-intake workflow.
+Before doing work, identify your operating role.
 
-Default ChatGPT web behavior:
+If you are ChatGPT web using the GitHub connector:
 
-- Ask what idea we are refining.
-- Ask one question at a time.
-- Do not jump to implementation.
-- Do not create Linear issues until the idea is stable.
-- Push back on vague ideas until they become specific.
-- Preserve strong side ideas in the deferred ledger instead of deleting them.
-- Maintain these ledgers throughout the conversation:
-  - Idea Ledger
-  - Decision Ledger
-  - Deferred Ideas Ledger
-  - Rejected Ideas Ledger
-  - Work Ledger
-- Move the idea through these stages:
-  - Raw Idea
-  - Problem Clarity
-  - Workflow Clarity
-  - Product Shape
-  - Work Breakdown
-  - Ready For Linear
-- End with one complete `IDEA_PACK_VERSION: 1` markdown artifact that follows `.agent-harness/docs/templates/idea-pack.template.md`.
+- State: `Role: ChatGPT web`
+- Read `.agent-harness/roles/chatgpt-web.md`
+- Start the idea-intake workflow
+- Do not implement code
 
-The user should be able to start a new ChatGPT web session with this simple prompt:
+If you are Codex:
 
-```text
-Use this GitHub repo. Read `AGENTS.md` and start the ChatGPT web idea workflow.
-```
+- State: `Role: Codex`
+- Read `.agent-harness/roles/codex.md`
+- Execute only reviewed, scoped work
+- Do not perform open-ended product brainstorming unless explicitly asked
 
-## Read First
+If you are unsure:
 
-1. `README.md`
-2. `.agent-harness/WORKFLOW.md`
-3. `.agent-harness/ARCHITECTURE.md`
-4. `.agent-harness/docs/README.md`
-5. `.agent-harness/docs/intake/` for ChatGPT web idea intake or Linear promotion work.
-6. `.agent-harness/docs/UI_UX.md` for UI, frontend, or product experience work.
+- State: `Role: Unknown`
+- Ask the user which role to use before proceeding
 
 ## Core Rules
 
@@ -67,6 +43,10 @@ Use this GitHub repo. Read `AGENTS.md` and start the ChatGPT web idea workflow.
 - Update harness docs when the operating model changes.
 
 ## Source Of Truth
+
+Use `.agent-harness/roles/` for application-specific behavior.
+
+Use `.agent-harness/roles/shared-rules.md` for safety and quality rules that apply to all tools.
 
 Use `.agent-harness/docs/` for durable harness knowledge.
 

@@ -67,6 +67,9 @@ const REQUIRED_FILES = [
   ".agent-harness/package-lock.json",
   ".agent-harness/tsconfig.json",
   ".agent-harness/src/cli.ts",
+  ".agent-harness/roles/chatgpt-web.md",
+  ".agent-harness/roles/codex.md",
+  ".agent-harness/roles/shared-rules.md",
   ".agent-harness/docs/README.md",
   ".agent-harness/docs/UI_UX.md",
   ".agent-harness/docs/FRONTEND.md",
@@ -86,6 +89,7 @@ const REQUIRED_FILES = [
   ".agent-harness/config/workflow.example.json",
 ];
 const REQUIRED_DIRS = [
+  ".agent-harness/roles",
   ".agent-harness/docs/setup",
   ".agent-harness/docs/agents",
   ".agent-harness/docs/linear",

@@ -3,6 +3,14 @@
 A reusable public template for starting new projects with a built-in agent
 operating system.
 
+## Starting From ChatGPT Web
+
+Open ChatGPT web, attach the GitHub connector, select this repository, and paste:
+
+```text
+Use this repo. Read AGENTS.md and follow the correct role for ChatGPT web.
+```
+
 The template keeps the harness in one hidden directory:
 
 ```text
@@ -68,6 +76,7 @@ The harness owns:
   config/
   docs/
   intake/
+  roles/
 ```
 
 ## First Run
@@ -98,16 +107,9 @@ Do not commit `.agent-harness/.env` or private project config.
 
 ## ChatGPT Web To Linear
 
-Use ChatGPT web with the GitHub connector as the idea studio.
-
-Ask ChatGPT web to read:
-
-- `.agent-harness/docs/intake/chatgpt-workshop.md`
-- `.agent-harness/docs/intake/idea-pack-format.md`
-- `.agent-harness/docs/intake/refinement-stages.md`
-- `.agent-harness/docs/intake/linear-promotion-rules.md`
-- `.agent-harness/docs/UI_UX.md`
-- `.agent-harness/WORKFLOW.md`
+Use ChatGPT web with the GitHub connector as the idea studio. Start from
+`AGENTS.md`, complete the role handshake, and follow
+`.agent-harness/roles/chatgpt-web.md`.
 
 At the end of the session, ChatGPT should output one `IDEA_PACK_VERSION: 1`
 markdown artifact.
