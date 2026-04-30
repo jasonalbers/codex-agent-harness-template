@@ -359,6 +359,20 @@ function validateEnv(flags: Record<string, string | boolean>): number {
   return 0;
 }
 
+const VALIDATION_IGNORED_RELATIVE_FILES = [
+  ".agent-harness/.env",
+];
+
+const VALIDATION_IGNORED_RELATIVE_FILE_PATTERNS = [
+  /^\.agent-harness\/\.env\..+/,
+  /^\.agent-harness\/config\/.+\.local\.json$/,
+  /^\.agent-harness\/config\/.+\.private\.json$/,
+];
+
+export function textFilesForValidation(relativePath: string): boolean {
+  return !VALIDATION_IGNORED_RELATIVE_FILES.includes(relativePath) && !VALIDATION_IGNORED_RELATIVE_FILE_PATTERNS.some((pattern) => pattern.test(relativePath));
+}
+
 function textFiles(root: string): string[] {
   const ignoredNames = new Set([".git", "node_modules", "dist", "__pycache__", ".runtime", ".symphony", "openai-symphony"]);
   const ignoredRelativePrefixes = [
@@ -374,6 +388,9 @@ function textFiles(root: string): string[] {
       if (ignoredNames.has(entry)) continue;
       const fullPath = join(directory, entry);
       const relativePath = rel(fullPath);
+      if (!textFilesForValidation(relativePath)) {
+        continue;
+      }
       if (ignoredRelativePrefixes.some((prefix) => relativePath.startsWith(prefix)) && !relativePath.endsWith(".gitkeep")) {
         continue;
       }
