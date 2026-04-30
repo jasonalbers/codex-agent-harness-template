@@ -23,6 +23,8 @@ The dry run performs the same local publish-environment checks before a live
 run claims work. It verifies `gh auth status`, target repo visibility, a
 disposable clone under `AGENT_WORKSPACE_ROOT`, local branch creation, writable
 `.git` metadata, and a `git push --dry-run` for the publish branch.
+Relative `AGENT_WORKSPACE_ROOT` values are resolved from the repository root
+before they are passed to Symphony.
 
 ## Ordered Ready Issues
 

@@ -20,6 +20,7 @@ node .agent-harness/dist/cli.js project summary
 `agent start --dry-run` also runs a disposable publish preflight under
 `AGENT_WORKSPACE_ROOT`. It verifies the target repo can be read, cloned, branched
 locally, and pushed in `--dry-run` mode before any Linear issue is claimed.
+Relative workspace roots are resolved from the repository root.
 
 ## Public Template Settings
 
