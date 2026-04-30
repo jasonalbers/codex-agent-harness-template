@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, requiredLinearStateId, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, requiredLinearStateId, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -173,6 +173,59 @@ test("reports a clear setup blocker when requested Linear state is missing", () 
     () => requiredLinearStateId(new Map([["In Progress", "state-id"]]), "Ready to Merge"),
     /Linear state Ready to Merge was not found/,
   );
+});
+
+test("post-publish state transition retries when Linear automation reverts the first update", async () => {
+  const logs: string[] = [];
+  let mutationCalls = 0;
+  const issue = { id: "issue-id", identifier: "JAS-51", title: "Add synthetic mission matrix" };
+  const ready = { id: "issue-id", identifier: "JAS-51", state: { id: "ready-state-id", name: "Ready to Merge" } };
+  const reverted = { id: "issue-id", identifier: "JAS-51", state: { id: "in-progress-state-id", name: "In Progress" } };
+  const fetchResults = [ready, reverted, ready, ready];
+
+  await runVerifiedLinearStateTransition({
+    issue,
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+    settleAttempts: 2,
+    settleMs: 1,
+  }, {
+    mutate: async () => {
+      mutationCalls += 1;
+      return { data: { issueUpdate: { success: true, issue: ready } } };
+    },
+    fetchIssue: async () => fetchResults.shift(),
+    sleep: async () => undefined,
+    log: (message: string) => logs.push(message),
+  });
+
+  assert.equal(mutationCalls, 2);
+  assert.deepEqual(logs, ["Updated issue state: JAS-51 -> Ready to Merge"]);
+});
+
+test("post-publish state transition fails without success log when state never settles", async () => {
+  const logs: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-51", title: "Add synthetic mission matrix" };
+  const ready = { id: "issue-id", identifier: "JAS-51", state: { id: "ready-state-id", name: "Ready to Merge" } };
+  const reverted = { id: "issue-id", identifier: "JAS-51", state: { id: "in-progress-state-id", name: "In Progress" } };
+
+  await assert.rejects(
+    runVerifiedLinearStateTransition({
+      issue,
+      stateId: "ready-state-id",
+      stateName: "Ready to Merge",
+      settleAttempts: 1,
+      settleMs: 1,
+    }, {
+      mutate: async () => ({ data: { issueUpdate: { success: true, issue: ready } } }),
+      fetchIssue: async () => reverted,
+      sleep: async () => undefined,
+      log: (message: string) => logs.push(message),
+    }),
+    /Linear state update verification failed for JAS-51 -> Ready to Merge/,
+  );
+
+  assert.deepEqual(logs, []);
 });
 
 test("passes Symphony unattended guardrail acknowledgement flag", () => {

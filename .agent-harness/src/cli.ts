@@ -108,6 +108,19 @@ type LinearStateUpdateOptions = {
   settleAttempts?: number;
 };
 
+type LinearStateTransitionInput = LinearStateUpdateOptions & {
+  issue: AgentOrderIssue;
+  stateId: string;
+  stateName: string;
+};
+
+type LinearStateTransitionDeps = {
+  mutate: () => Promise<Record<string, any>>;
+  fetchIssue: () => Promise<LinearIssueStateUpdateIssue | undefined>;
+  sleep?: (ms: number) => Promise<void>;
+  log?: (message: string) => void;
+};
+
 type ValidationResult = {
   ok: boolean;
   errors: string[];
@@ -1054,6 +1067,60 @@ async function fetchLinearIssueForStateVerification(apiKey: string, issueId: str
   return result.data?.issue;
 }
 
+export async function runVerifiedLinearStateTransition(input: LinearStateTransitionInput, deps: LinearStateTransitionDeps): Promise<void> {
+  const settleMs = input.settleMs ?? 0;
+  const settleAttempts = input.settleAttempts ?? 0;
+  const sleepFn = deps.sleep ?? sleep;
+  const logFn = deps.log ?? console.log;
+  let lastMutationResult: Record<string, any> | undefined;
+  let lastVerifiedIssue: LinearIssueStateUpdateIssue | undefined;
+  let lastErrors: string[] = [];
+
+  for (let attempt = 0; attempt <= settleAttempts; attempt += 1) {
+    if (attempt > 0 && settleMs > 0) await sleepFn(settleMs);
+
+    const mutationResult = await deps.mutate();
+    lastMutationResult = mutationResult;
+    const mutation = mutationResult.data?.issueUpdate;
+    const verifiedIssue = await deps.fetchIssue();
+    lastVerifiedIssue = verifiedIssue;
+    const errors = verifyLinearStateTransitionResult({
+      mutationIssue: mutation?.issue,
+      queryIssue: verifiedIssue,
+      success: mutation?.success,
+    }, { issueId: input.issue.id, stateId: input.stateId, stateName: input.stateName });
+    lastErrors = errors;
+    if (errors.length > 0) continue;
+
+    if (settleMs > 0) {
+      await sleepFn(settleMs);
+      const settledIssue = await deps.fetchIssue();
+      lastVerifiedIssue = settledIssue;
+      const settleErrors = verifyLinearStateTransitionResult({
+        mutationIssue: mutation?.issue,
+        queryIssue: settledIssue,
+        success: mutation?.success,
+      }, { issueId: input.issue.id, stateId: input.stateId, stateName: input.stateName });
+      lastErrors = settleErrors;
+      if (settleErrors.length > 0) continue;
+    }
+
+    logFn(`Updated issue state: ${input.issue.identifier} -> ${input.stateName}`);
+    return;
+  }
+
+  throw new Error([
+    `Linear state update verification failed for ${input.issue.identifier} -> ${input.stateName}.`,
+    ...lastErrors.map((error) => `- ${error}`),
+    "",
+    "Mutation response:",
+    compactJson(lastMutationResult ?? null),
+    "",
+    "Verification query issue:",
+    compactJson(lastVerifiedIssue ?? null),
+  ].join("\n"));
+}
+
 function descriptionMarkers(description: string): string[] {
   const headings = [...description.matchAll(/^##\s+.+$/gm)].map((match) => match[0].trim());
   if (headings.length > 0) return headings;
@@ -1174,59 +1241,14 @@ async function fetchAgentIssueByIdentifier(apiKey: string, projectSlug: string, 
 }
 
 async function updateLinearIssueState(apiKey: string, issue: AgentOrderIssue, stateId: string, stateName: string, options: LinearStateUpdateOptions = {}): Promise<void> {
-  const settleMs = options.settleMs ?? 0;
-  const settleAttempts = options.settleAttempts ?? 0;
-  let lastMutationResult: Record<string, any> | undefined;
-  let lastVerifiedIssue: LinearIssueStateUpdateIssue | undefined;
-  let lastErrors: string[] = [];
-
-  for (let attempt = 0; attempt <= settleAttempts; attempt += 1) {
-    if (attempt > 0 && settleMs > 0) await sleep(settleMs);
-
-    const mutationResult = await linearGraphql(apiKey, `
+  await runVerifiedLinearStateTransition({ issue, stateId, stateName, ...options }, {
+    mutate: () => linearGraphql(apiKey, `
       mutation UpdateAgentIssueState($id: String!, $input: IssueUpdateInput!) {
         issueUpdate(id: $id, input: $input) { success issue { id identifier state { id name } } }
       }
-    `, { id: issue.id, input: { stateId } });
-    lastMutationResult = mutationResult;
-    const mutation = mutationResult.data?.issueUpdate;
-    const verifiedIssue = await fetchLinearIssueForStateVerification(apiKey, issue.id);
-    lastVerifiedIssue = verifiedIssue;
-    const errors = verifyLinearStateTransitionResult({
-      mutationIssue: mutation?.issue,
-      queryIssue: verifiedIssue,
-      success: mutation?.success,
-    }, { issueId: issue.id, stateId, stateName });
-    lastErrors = errors;
-    if (errors.length > 0) continue;
-
-    if (settleMs > 0) {
-      await sleep(settleMs);
-      const settledIssue = await fetchLinearIssueForStateVerification(apiKey, issue.id);
-      lastVerifiedIssue = settledIssue;
-      const settleErrors = verifyLinearStateTransitionResult({
-        mutationIssue: mutation?.issue,
-        queryIssue: settledIssue,
-        success: mutation?.success,
-      }, { issueId: issue.id, stateId, stateName });
-      lastErrors = settleErrors;
-      if (settleErrors.length > 0) continue;
-    }
-
-    console.log(`Updated issue state: ${issue.identifier} -> ${stateName}`);
-    return;
-  }
-
-  throw new Error([
-    `Linear state update verification failed for ${issue.identifier} -> ${stateName}.`,
-    ...lastErrors.map((error) => `- ${error}`),
-    "",
-    "Mutation response:",
-    compactJson(lastMutationResult ?? null),
-    "",
-    "Verification query issue:",
-    compactJson(lastVerifiedIssue ?? null),
-  ].join("\n"));
+    `, { id: issue.id, input: { stateId } }),
+    fetchIssue: () => fetchLinearIssueForStateVerification(apiKey, issue.id),
+  });
 }
 
 async function addLinearIssueComment(apiKey: string, issue: AgentOrderIssue, body: string): Promise<void> {
