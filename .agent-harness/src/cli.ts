@@ -81,6 +81,19 @@ export type OrderedAgentRunPlan = {
   readyIssues: AgentOrderIssue[];
 };
 
+export type AgentLifecycleUpdate = {
+  issue: AgentOrderIssue | undefined;
+  stateId: string;
+  stateName: string;
+  reason: "hold-later-ready" | "claim-selected";
+};
+
+type AgentClaimResult = {
+  code: number;
+  selected?: AgentOrderIssue;
+  stateIds?: Map<string, string>;
+};
+
 type ValidationResult = {
   ok: boolean;
   errors: string[];
@@ -208,7 +221,7 @@ function usage(): string {
     "  node .agent-harness/dist/cli.js linear sync [--dry-run] [--project-slug <slug>]",
     "",
     "Agent/Symphony:",
-    "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--in-progress-state \"In Progress\"] [--dry-run]",
     "  node .agent-harness/dist/cli.js symphony bootstrap",
     "  node .agent-harness/dist/cli.js symphony preflight",
     "  node .agent-harness/dist/cli.js symphony run",
@@ -684,6 +697,42 @@ export function planOrderedAgentRun(issues: AgentOrderIssue[]): OrderedAgentRunP
   return { selected, holdIssues, readyIssues };
 }
 
+export function planAgentLifecycleUpdates(
+  plan: OrderedAgentRunPlan,
+  stateIds: Map<string, string>,
+  options: { holdStateName: string; inProgressStateName: string },
+): { updates: AgentLifecycleUpdate[]; errors: string[] } {
+  const updates: AgentLifecycleUpdate[] = [];
+  const errors: string[] = [];
+  if (plan.holdIssues.length > 0) {
+    const holdStateId = stateIds.get(options.holdStateName);
+    if (!holdStateId) {
+      errors.push(`Cannot hold later Ready for Agent issues because Linear state ${options.holdStateName} was not found.`);
+    } else {
+      updates.push(...plan.holdIssues.map((issue) => ({
+        issue,
+        stateId: holdStateId,
+        stateName: options.holdStateName,
+        reason: "hold-later-ready" as const,
+      })));
+    }
+  }
+  if (plan.selected) {
+    const inProgressStateId = stateIds.get(options.inProgressStateName);
+    if (!inProgressStateId) {
+      errors.push(`Cannot claim selected issue because Linear state ${options.inProgressStateName} was not found.`);
+    } else {
+      updates.push({
+        issue: plan.selected,
+        stateId: inProgressStateId,
+        stateName: options.inProgressStateName,
+        reason: "claim-selected",
+      });
+    }
+  }
+  return { updates, errors };
+}
+
 async function linearGraphql(apiKey: string, query: string, variables: Record<string, unknown>): Promise<Record<string, any>> {
   const response = await fetch("https://api.linear.app/graphql", {
     method: "POST",
@@ -811,33 +860,67 @@ async function fetchOrderedAgentIssues(apiKey: string, projectSlug: string): Pro
   };
 }
 
-async function enforceAgentIssueOrder(apiKey: string, projectSlug: string, holdStateName: string): Promise<number> {
+async function updateLinearIssueState(apiKey: string, issue: AgentOrderIssue, stateId: string, stateName: string): Promise<void> {
+  await linearGraphql(apiKey, `
+    mutation UpdateAgentIssueState($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) { success issue { identifier state { name } } }
+    }
+  `, { id: issue.id, input: { stateId } });
+  console.log(`Updated issue state: ${issue.identifier} -> ${stateName}`);
+}
+
+async function addLinearIssueComment(apiKey: string, issue: AgentOrderIssue, body: string): Promise<void> {
+  await linearGraphql(apiKey, `
+    mutation AddAgentIssueComment($input: CommentCreateInput!) {
+      commentCreate(input: $input) { success comment { id } }
+    }
+  `, { input: { issueId: issue.id, body } });
+  console.log(`Added blocker comment to ${issue.identifier}`);
+}
+
+export function agentBlockedCommentBody(result: { command: string; exitCode: number }): string {
+  return [
+    "Agent runner exited before completing work.",
+    "",
+    `Command: \`${result.command}\``,
+    `Exit code: \`${result.exitCode}\``,
+    "",
+    "The issue was moved to `Blocked` so a human can inspect the local runner logs, fix the setup or command failure, and move the issue back to `Changes Requested` or `Ready for Agent` when it is safe to retry.",
+  ].join("\n");
+}
+
+async function markIssueBlocked(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
+  const blockedStateId = stateIds.get("Blocked");
+  if (!blockedStateId) {
+    console.error("Runner failed, but Linear state Blocked was not found.");
+    return;
+  }
+  await updateLinearIssueState(apiKey, issue, blockedStateId, "Blocked");
+  await addLinearIssueComment(apiKey, issue, body);
+}
+
+async function enforceAgentIssueOrder(apiKey: string, projectSlug: string, holdStateName: string, inProgressStateName: string): Promise<AgentClaimResult> {
   const context = await fetchOrderedAgentIssues(apiKey, projectSlug);
   if (!context) {
     console.error(`No Linear project found for slug ${projectSlug}.`);
-    return 1;
+    return { code: 1 };
   }
   const plan = planOrderedAgentRun(context.readyIssues);
   if (!plan.selected) {
     console.error(`No Ready for Agent issues found in project ${projectSlug}.`);
-    return 1;
+    return { code: 1 };
   }
   console.log(`Next Ready for Agent issue: ${plan.selected.identifier} ${plan.selected.title}`);
-  if (plan.holdIssues.length === 0) return 0;
-  const holdStateId = context.stateIds.get(holdStateName);
-  if (!holdStateId) {
-    console.error(`Cannot hold later Ready for Agent issues because Linear state ${holdStateName} was not found.`);
-    return 1;
+  const lifecycle = planAgentLifecycleUpdates(plan, context.stateIds, { holdStateName, inProgressStateName });
+  if (lifecycle.errors.length > 0) {
+    lifecycle.errors.forEach((error) => console.error(error));
+    return { code: 1 };
   }
-  for (const issue of plan.holdIssues) {
-    await linearGraphql(apiKey, `
-      mutation HoldLaterReadyIssue($id: String!, $input: IssueUpdateInput!) {
-        issueUpdate(id: $id, input: $input) { success issue { identifier state { name } } }
-      }
-    `, { id: issue.id, input: { stateId: holdStateId } });
-    console.log(`Held later issue until its turn: ${issue.identifier} -> ${holdStateName}`);
+  for (const update of lifecycle.updates) {
+    if (!update.issue) continue;
+    await updateLinearIssueState(apiKey, update.issue, update.stateId, update.stateName);
   }
-  return 0;
+  return { code: 0, selected: plan.selected, stateIds: context.stateIds };
 }
 
 async function createLinearIssues(path: string, flags: Record<string, string | boolean>): Promise<number> {
@@ -1057,7 +1140,7 @@ function writeCompiledPack(pack: IdeaPack, outDir: string): void {
     const order = { index: index + 1, total: pack.issues.length };
     return [`## Issue: ${formatLinearIssueTitle({ title: issue.title, order })}`, "", `Labels: ${formatIdeaLabelName(pack.metadata.idea_id)}`, "", issueDescription(issue, pack, order), ""];
   })].join("\n"), "utf8");
-  writeFileSync(join(outDir, "promotion-report.md"), ["# Promotion Report", "", `- Idea ID: ${pack.metadata.idea_id}`, `- Idea name: ${pack.metadata.idea_name}`, `- Issues ready for Linear: ${pack.issues.length}`, "", "## Human Review Checklist", "", "- [ ] Idea Pack validation passed.", "- [ ] Open questions are answered or explicitly deferred.", "- [ ] Deferred ideas are preserved.", "- [ ] Each issue is small enough for one pull request.", "- [ ] Created Linear issues should not be moved to Ready for Agent until reviewed."].join("\n"), "utf8");
+  writeFileSync(join(outDir, "promotion-report.md"), ["# Promotion Report", "", `- Idea ID: ${pack.metadata.idea_id}`, `- Idea name: ${pack.metadata.idea_name}`, `- Issues ready for Linear: ${pack.issues.length}`, "", "## Approval Checklist", "", "- [ ] Idea Pack validation passed.", "- [ ] Open questions are answered or explicitly deferred.", "- [ ] Deferred ideas are preserved.", "- [ ] Each issue is small enough for one pull request.", "- [ ] Created Linear issues should not be moved to Ready for Agent until reviewed."].join("\n"), "utf8");
 }
 
 function renderIdeaPassport(pack: IdeaPack): string {
@@ -1224,6 +1307,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const dotenv = loadDotenv();
   const dryRun = Boolean(flags["dry-run"]) || boolValue(env("AGENT_DRY_RUN", dotenv), true);
   const holdStateName = typeof flags["hold-state"] === "string" ? flags["hold-state"] : env("AGENT_READY_HOLD_STATE", dotenv) || "Todo";
+  const inProgressStateName = typeof flags["in-progress-state"] === "string" ? flags["in-progress-state"] : env("AGENT_IN_PROGRESS_STATE", dotenv) || "In Progress";
   const project = projectByName(projectName);
   if (!project) {
     console.error(`Unknown project: ${projectName}`);
@@ -1252,6 +1336,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   console.log(`Linear slug: ${project.linear_project_slug}`);
   console.log(`Agent enabled: ${project.agent_enabled}`);
   console.log(`Ready ordering hold state: ${holdStateName}`);
+  console.log(`Claim state: ${inProgressStateName}`);
   if (dryRun) {
     console.log("Dry run: no Symphony or Codex process started.");
     console.log("Resolved live runner inputs:");
@@ -1272,9 +1357,14 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     blockers.forEach((blocker) => console.log(`- ${blocker}`));
     return 1;
   }
-  const orderingCode = await enforceAgentIssueOrder(env("LINEAR_API_KEY", dotenv), project.linear_project_slug, holdStateName);
-  if (orderingCode !== 0) return orderingCode;
-  return symphonyRun(runEnv);
+  const apiKey = env("LINEAR_API_KEY", dotenv);
+  const claim = await enforceAgentIssueOrder(apiKey, project.linear_project_slug, holdStateName, inProgressStateName);
+  if (claim.code !== 0) return claim.code;
+  const runCode = symphonyRun(runEnv);
+  if (runCode !== 0 && claim.selected && claim.stateIds) {
+    await markIssueBlocked(apiKey, claim.selected, claim.stateIds, agentBlockedCommentBody({ command: "symphony run", exitCode: runCode }));
+  }
+  return runCode;
 }
 
 async function main(): Promise<number> {

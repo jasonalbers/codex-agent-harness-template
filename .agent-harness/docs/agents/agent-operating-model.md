@@ -15,4 +15,4 @@ Agents must:
 - Run verification.
 - Produce proof of work.
 - Open a GitHub PR.
-- Stop for human review when required.
+- Move Linear work through the configured autopilot states.

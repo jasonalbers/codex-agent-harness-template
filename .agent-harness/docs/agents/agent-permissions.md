@@ -14,5 +14,5 @@ Agents must not:
 - Commit secrets.
 - Modify unrelated repositories.
 - Run live destructive actions without an explicit issue and approval.
-- Bypass human review.
+- Start work before the issue is moved to `Ready for Agent`.
 - Merge without the configured workflow allowing it.

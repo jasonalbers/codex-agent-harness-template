@@ -22,7 +22,8 @@ agent work is enabled.
 - [ ] Confirm Codex creates a branch using `agent/<issue-id>-...`.
 - [ ] Confirm a PR is opened with proof of work.
 - [ ] Confirm no runtime files are committed.
-- [ ] Confirm the issue can move through human review and merge handoff.
+- [ ] Confirm the issue can move through `In Progress`, `Ready to Merge`,
+  `Done`, and `Blocked` when appropriate.
 
 ## Verification
 
