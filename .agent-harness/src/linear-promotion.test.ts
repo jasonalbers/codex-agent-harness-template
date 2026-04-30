@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { verifyCreatedLinearIssue } from "./cli.js";
+import { textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -32,4 +32,12 @@ test("rejects archived or hidden Linear promotion results", () => {
   assert.match(errors.join("\n"), /issue is archived/);
   assert.match(errors.join("\n"), /project slug is wrong-project/);
   assert.match(errors.join("\n"), /description is missing marker ## Idea Context/);
+});
+
+test("validation text scan ignores local secret files", () => {
+  assert.equal(textFilesForValidation(".agent-harness/.env"), false);
+  assert.equal(textFilesForValidation(".agent-harness/.env.local"), false);
+  assert.equal(textFilesForValidation(".agent-harness/config/projects.local.json"), false);
+  assert.equal(textFilesForValidation(".agent-harness/config/projects.private.json"), false);
+  assert.equal(textFilesForValidation(".agent-harness/config/projects.example.json"), true);
 });
