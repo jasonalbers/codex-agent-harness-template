@@ -14,11 +14,11 @@ Codex, Symphony, or other agents should only execute after an idea has been refi
 
 Read these files before running the idea workflow:
 
-1. `README.md`
-2. `AGENTS.md`
-3. `.agent-harness/WORKFLOW.md`
-4. `.agent-harness/ARCHITECTURE.md`
-5. `.agent-harness/roles/shared-rules.md`
+1. `AGENTS.md`
+2. `README.md`
+3. `.agent-harness/roles/shared-rules.md`
+4. `.agent-harness/WORKFLOW.md`
+5. `.agent-harness/ARCHITECTURE.md`
 6. `.agent-harness/docs/intake/chatgpt-workshop.md`
 7. `.agent-harness/docs/intake/idea-pack-format.md`
 8. `.agent-harness/docs/intake/refinement-stages.md`

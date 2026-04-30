@@ -30,4 +30,4 @@ These rules apply to all AI tools working in this repository.
 - ChatGPT web creates Idea Packs.
 - Codex executes reviewed work.
 - Linear tracks build work.
-- GitHub stores code, docs, branches, PRs, and proof of work.
+- GitHub stores code, docs, branches, pull requests, and proof of work.
