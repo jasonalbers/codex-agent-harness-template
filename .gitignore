@@ -77,3 +77,5 @@ __pycache__/
 !.agent-harness/intake/compiled/.gitkeep
 !.agent-harness/intake/promoted/.gitkeep
 !.agent-harness/intake/archive/.gitkeep
+
+.agent-workspaces/
