@@ -48,6 +48,7 @@ const DEFAULT_REF = "main";
 
 const TEMPLATE_OWNED_PATTERNS = [
   "AGENTS.md",
+  ".agent-harness/.env.example",
   ".agent-harness/ARCHITECTURE.md",
   ".agent-harness/WORKFLOW.md",
   ".agent-harness/package.json",
@@ -118,6 +119,9 @@ export function normalizeTemplateRepo(repo: string): string {
 
 export function classifyTemplatePath(path: string, options: Partial<PlanOptions>): PathClassification {
   const normalizedPath = normalizePath(path);
+  if (normalizedPath === ".agent-harness/.env.example") {
+    return "owned";
+  }
   if (PROTECTED_PATTERNS.some((pattern) => matchesPattern(normalizedPath, pattern))) {
     return "protected";
   }
