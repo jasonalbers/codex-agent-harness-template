@@ -8,7 +8,7 @@ operating system.
 Open ChatGPT web, attach the GitHub connector, select this repository, and paste:
 
 ```text
-Use this repo. Read AGENTS.md and follow the correct role for ChatGPT web.
+Use this repo. Read AGENTS.md and start.
 ```
 
 The template keeps the harness in one hidden directory:

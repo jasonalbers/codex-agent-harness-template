@@ -67,6 +67,7 @@ const REQUIRED_FILES = [
   ".agent-harness/package-lock.json",
   ".agent-harness/tsconfig.json",
   ".agent-harness/src/cli.ts",
+  ".agent-harness/roles/README.md",
   ".agent-harness/roles/chatgpt-web.md",
   ".agent-harness/roles/codex.md",
   ".agent-harness/roles/shared-rules.md",

@@ -13,9 +13,9 @@ Codex should not act as the product strategist or idea-refinement studio unless 
 Read these files before starting work:
 
 1. `AGENTS.md`
-2. `.agent-harness/WORKFLOW.md`
-3. `.agent-harness/ARCHITECTURE.md`
-4. `.agent-harness/roles/shared-rules.md`
+2. `.agent-harness/roles/shared-rules.md`
+3. `.agent-harness/WORKFLOW.md`
+4. `.agent-harness/ARCHITECTURE.md`
 5. Relevant Linear issue or GitHub issue
 6. Relevant project documentation
 

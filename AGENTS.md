@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This project includes a reusable agent harness in `.agent-harness/`.
+This repository includes a reusable agent harness in `.agent-harness/`.
 
-`AGENTS.md` is the universal entry point for ChatGPT web, Codex, and future
-agents. Tools must identify their operating role before doing work, then follow
-the matching role file.
+`AGENTS.md` is the universal entry point for AI tools working in this repository.
+
+Keep this file short. Detailed role behavior belongs in `.agent-harness/roles/`.
 
 ## Role Handshake
 
@@ -34,7 +34,7 @@ If you are unsure:
 - The harness lives in `.agent-harness/`.
 - Product code should stay outside `.agent-harness/`.
 - Linear issues drive implementation work.
-- No product work happens unless tied to a reviewed Linear issue.
+- No product implementation happens unless tied to a reviewed Linear issue or explicit user task.
 - Every agent run must produce proof of work.
 - Never commit secrets, tokens, `.env` files, logs, or runtime workspaces.
 - Use the TypeScript CLI as the single control surface:
@@ -44,10 +44,6 @@ If you are unsure:
 
 ## Source Of Truth
 
-Use `.agent-harness/roles/` for application-specific behavior.
-
-Use `.agent-harness/roles/shared-rules.md` for safety and quality rules that apply to all tools.
-
-Use `.agent-harness/docs/` for durable harness knowledge.
-
-Use `.agent-harness/WORKFLOW.md` for the Symphony-style run policy.
+- Role-specific behavior lives in `.agent-harness/roles/`.
+- Durable harness knowledge lives in `.agent-harness/docs/`.
+- Symphony-style execution policy lives in `.agent-harness/WORKFLOW.md`.
