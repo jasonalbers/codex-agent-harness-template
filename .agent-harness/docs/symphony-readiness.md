@@ -12,6 +12,8 @@ Individual projects are ready for live Symphony-style runs only after their proj
 - `node .agent-harness/dist/cli.js agent start` provides a project-aware dry-run and live entry point.
 - Live `agent start` passes the upstream Symphony unattended guardrail
   acknowledgement flag after readiness checks pass.
+- Parent CLI publishing owns branch creation, commits, pull requests, and Linear
+  status updates after the worker exits.
 - `node .agent-harness/dist/cli.js symphony bootstrap` pins upstream Symphony through `SYMPHONY_REF`.
 - `.agent-harness/docs/templates/proof-of-work.template.md` defines proof format.
 - `.github/workflows/validate.yml` runs base validation.

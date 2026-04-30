@@ -132,22 +132,23 @@ Include:
 
 ## Pull Requests
 
-PR title format:
+The parent `.agent-harness` CLI owns branch creation, commits, pull request
+creation, and Linear state transitions after the worker exits. The Codex worker
+must not create branches, push, open pull requests, merge, or move Linear issues.
+
+The parent CLI uses this PR title format:
 
 ```text
 [Linear issue id] Short description
 ```
 
-Open a PR with verification evidence and proof of work.
-
-If verification passes and repository policy allows autopilot merge, merge the
-PR and record the merge result in the proof of work. If merge is not available
-to the runner, leave the PR ready and keep Linear at `Ready to Merge` with the
-reason recorded.
+When implementation and verification are complete, leave the workspace changes
+in place and stop. The parent CLI will publish the workspace from the verified
+host environment and move Linear to `Ready to Merge`.
 
 ## Linear Updates
 
-Use this lifecycle:
+The parent CLI owns this lifecycle:
 
 - `Ready for Agent` -> `In Progress`
 - `Changes Requested` -> `In Progress`

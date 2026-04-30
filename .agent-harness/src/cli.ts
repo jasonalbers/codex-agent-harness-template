@@ -373,6 +373,14 @@ type PublishPreflightResult = {
   workspace?: string;
 };
 
+type ParentPublishResult = {
+  ok: boolean;
+  skipped?: boolean;
+  branch?: string;
+  prUrl?: string;
+  message: string;
+};
+
 function repoCloneUrl(repo: string): string {
   if (/^(https?:\/\/|git@|ssh:\/\/)/.test(repo)) {
     return repo;
@@ -470,6 +478,90 @@ export function publishPreflight(repo: string, workspaceRoot: string, envValues:
   }
 
   return { ok: blockers.length === 0, checked, blockers, workspace: resolvedWorkspaceRoot };
+}
+
+export function agentBranchName(issue: AgentOrderIssue): string {
+  return `agent/${issue.identifier.toLowerCase()}-${slugify(issue.title).slice(0, 48)}`;
+}
+
+function workspaceForIssue(workspaceRoot: string, issue: AgentOrderIssue): string {
+  return join(resolveWorkspaceRoot(workspaceRoot), issue.identifier);
+}
+
+function publishableStatusLines(workspace: string): string[] {
+  const status = runQuiet("git", ["status", "--porcelain=v1"], workspace);
+  if (!status.ok || !status.output) return [];
+  return status.output.split(/\r?\n/).filter((line) => {
+    const path = line.slice(3).trim();
+    return path !== ".codex" && !path.startsWith(".codex/");
+  });
+}
+
+export function hasPublishableChanges(workspace: string): boolean {
+  return publishableStatusLines(workspace).length > 0;
+}
+
+function parentPublishBody(issue: AgentOrderIssue, project: Project, branch: string): string {
+  return [
+    "## Summary",
+    "",
+    `Automated parent CLI publish for Linear issue ${issue.identifier}.`,
+    "",
+    "## Source",
+    "",
+    `- Linear issue: ${issue.identifier}`,
+    `- Project: ${project.name}`,
+    `- Branch: ${branch}`,
+    "",
+    "## Verification",
+    "",
+    "Verification was run by the agent worker before parent publish. See the Linear issue and runner logs for command output.",
+  ].join("\n");
+}
+
+function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, workspaceRoot: string): ParentPublishResult {
+  const workspace = workspaceForIssue(workspaceRoot, issue);
+  if (!existsSync(workspace)) {
+    return { ok: false, message: `agent workspace does not exist: ${workspace}` };
+  }
+  if (!existsSync(join(workspace, ".git"))) {
+    return { ok: false, message: `agent workspace is not a git repository: ${workspace}` };
+  }
+  if (!hasPublishableChanges(workspace)) {
+    return { ok: true, skipped: true, message: "no publishable workspace changes found" };
+  }
+
+  const branch = agentBranchName(issue);
+  const checkout = runQuiet("git", ["checkout", "-B", branch], workspace);
+  if (!checkout.ok) return { ok: false, branch, message: `failed to create publish branch ${branch}: ${checkout.output}` };
+
+  const add = runQuiet("git", ["add", "-A", "--", "."], workspace);
+  if (!add.ok) return { ok: false, branch, message: `failed to stage workspace changes: ${add.output}` };
+  runQuiet("git", ["reset", "--", ".codex"], workspace);
+
+  if (!hasPublishableChanges(workspace)) {
+    return { ok: true, skipped: true, branch, message: "only ignored worker runtime files changed" };
+  }
+
+  const commit = runQuiet("git", ["commit", "-m", `[${issue.identifier}] ${issue.title}`], workspace);
+  if (!commit.ok) return { ok: false, branch, message: `failed to commit workspace changes: ${commit.output}` };
+
+  const push = runQuiet("git", ["push", "-u", "origin", `HEAD:${branch}`], workspace);
+  if (!push.ok) return { ok: false, branch, message: `failed to push publish branch ${branch}: ${push.output}` };
+
+  const title = `[${issue.identifier}] ${issue.title}`;
+  const body = parentPublishBody(issue, project, branch);
+  const prCreate = runQuiet("gh", ["pr", "create", "--repo", project.repo, "--base", project.default_branch, "--head", branch, "--title", title, "--body", body], workspace);
+  if (prCreate.ok) {
+    const prUrl = prCreate.output.split(/\r?\n/).find((line) => line.startsWith("https://github.com/"))?.trim();
+    return { ok: true, branch, prUrl, message: "published workspace changes and opened pull request" };
+  }
+
+  const prView = runQuiet("gh", ["pr", "view", branch, "--repo", project.repo, "--json", "url", "--jq", ".url"], workspace);
+  if (prView.ok && prView.output.trim()) {
+    return { ok: true, branch, prUrl: prView.output.trim(), message: "published workspace changes and found existing pull request" };
+  }
+  return { ok: false, branch, message: `failed to open pull request for ${branch}: ${prCreate.output}` };
 }
 
 function validateEnv(flags: Record<string, string | boolean>): number {
@@ -987,7 +1079,7 @@ async function addLinearIssueComment(apiKey: string, issue: AgentOrderIssue, bod
       commentCreate(input: $input) { success comment { id } }
     }
   `, { input: { issueId: issue.id, body } });
-  console.log(`Added blocker comment to ${issue.identifier}`);
+  console.log(`Added comment to ${issue.identifier}`);
 }
 
 export function agentBlockedCommentBody(result: { command: string; exitCode: number }): string {
@@ -999,6 +1091,27 @@ export function agentBlockedCommentBody(result: { command: string; exitCode: num
     "",
     "The issue was moved to `Blocked` so a human can inspect the local runner logs, fix the setup or command failure, and move the issue back to `Changes Requested` or `Ready for Agent` when it is safe to retry.",
   ].join("\n");
+}
+
+function parentPublishCommentBody(result: ParentPublishResult): string {
+  return [
+    "Parent CLI publish completed after the agent worker finished implementation and verification.",
+    "",
+    `Branch: \`${result.branch || "not created"}\``,
+    `Pull request: ${result.prUrl || "not available"}`,
+    "",
+    result.message,
+  ].join("\n");
+}
+
+async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
+  const readyStateId = stateIds.get("Ready to Merge");
+  if (!readyStateId) {
+    console.error("Parent publish succeeded, but Linear state Ready to Merge was not found.");
+    return;
+  }
+  await updateLinearIssueState(apiKey, issue, readyStateId, "Ready to Merge");
+  await addLinearIssueComment(apiKey, issue, body);
 }
 
 async function markIssueBlocked(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
@@ -1576,8 +1689,24 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const claim = await enforceAgentIssueOrder(apiKey, project.linear_project_slug, holdStateName, inProgressStateName);
   if (claim.code !== 0) return claim.code;
   const runCode = symphonyRun(runEnv);
-  if (runCode !== 0 && claim.selected && claim.stateIds) {
-    await markIssueBlocked(apiKey, claim.selected, claim.stateIds, agentBlockedCommentBody({ command: "symphony run", exitCode: runCode }));
+  if (claim.selected && claim.stateIds) {
+    const publishResult = parentPublishWorkspace(project, claim.selected, runEnv.AGENT_WORKSPACE_ROOT);
+    if (publishResult.ok && !publishResult.skipped) {
+      await markIssueReadyToMerge(apiKey, claim.selected, claim.stateIds, parentPublishCommentBody(publishResult));
+      return 0;
+    }
+    if (runCode !== 0) {
+      const body = publishResult.ok
+        ? agentBlockedCommentBody({ command: "symphony run", exitCode: runCode })
+        : [
+          agentBlockedCommentBody({ command: "symphony run", exitCode: runCode }),
+          "",
+          "Parent CLI publish also failed:",
+          "",
+          publishResult.message,
+        ].join("\n");
+      await markIssueBlocked(apiKey, claim.selected, claim.stateIds, body);
+    }
   }
   return runCode;
 }
