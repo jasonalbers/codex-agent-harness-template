@@ -48,6 +48,19 @@ type LinearIssue = {
   notesForAgent: string;
 };
 
+type CreatedLinearIssue = {
+  id?: string;
+  identifier?: string;
+  title?: string;
+  url?: string;
+  archivedAt?: string | null;
+  description?: string | null;
+  project?: {
+    id?: string;
+    slugId?: string;
+  } | null;
+};
+
 type ValidationResult = {
   ok: boolean;
   errors: string[];
@@ -539,7 +552,80 @@ async function linearGraphql(apiKey: string, query: string, variables: Record<st
     body: JSON.stringify({ query, variables }),
   });
   if (!response.ok) throw new Error(`Linear request failed: ${response.status} ${response.statusText}`);
-  return (await response.json()) as Record<string, any>;
+  const body = (await response.json()) as Record<string, any>;
+  if (body.errors?.length) {
+    const messages = body.errors.map((error: { message?: string }) => error.message || "Unknown Linear error").join("; ");
+    throw new Error(`Linear GraphQL error: ${messages}`);
+  }
+  return body;
+}
+
+function descriptionMarkers(description: string): string[] {
+  const headings = [...description.matchAll(/^##\s+.+$/gm)].map((match) => match[0].trim());
+  if (headings.length > 0) return headings;
+  const firstLine = description.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return firstLine ? [firstLine] : [];
+}
+
+export function verifyCreatedLinearIssue(issue: CreatedLinearIssue, expected: { projectSlug: string; description: string }): string[] {
+  const label = issue.identifier || issue.title || issue.id || "unknown issue";
+  const errors: string[] = [];
+  if (!issue.id) errors.push(`${label}: missing Linear issue id`);
+  if (issue.archivedAt) errors.push(`${label}: issue is archived at ${issue.archivedAt}`);
+  if (issue.project?.slugId !== expected.projectSlug) {
+    errors.push(`${label}: project slug is ${issue.project?.slugId || "missing"}, expected ${expected.projectSlug}`);
+  }
+  const actualDescription = issue.description || "";
+  for (const marker of descriptionMarkers(expected.description)) {
+    if (!actualDescription.includes(marker)) errors.push(`${label}: description is missing marker ${marker}`);
+  }
+  return errors;
+}
+
+async function fetchProjectIssueIds(apiKey: string, projectId: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  let after: string | null = null;
+  do {
+    const result = await linearGraphql(apiKey, `
+      query ProjectIssueIds($id: String!, $after: String) {
+        project(id: $id) {
+          issues(first: 100, after: $after) {
+            nodes { id }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }
+    `, { id: projectId, after });
+    const page = result.data?.project?.issues;
+    for (const issue of page?.nodes ?? []) ids.add(issue.id);
+    after = page?.pageInfo?.hasNextPage ? page.pageInfo.endCursor : null;
+  } while (after);
+  return ids;
+}
+
+async function verifyLinearPromotion(apiKey: string, projectId: string, projectSlug: string, created: Array<{ id: string; expectedDescription: string }>): Promise<string[]> {
+  const errors: string[] = [];
+  const projectIssueIds = await fetchProjectIssueIds(apiKey, projectId);
+  for (const createdIssue of created) {
+    const result = await linearGraphql(apiKey, `
+      query CreatedIssueVerification($id: String!) {
+        issue(id: $id) {
+          id
+          identifier
+          title
+          archivedAt
+          description
+          project { id slugId }
+        }
+      }
+    `, { id: createdIssue.id });
+    const issue = result.data?.issue as CreatedLinearIssue | undefined;
+    errors.push(...verifyCreatedLinearIssue(issue ?? {}, { projectSlug, description: createdIssue.expectedDescription }));
+    if (!projectIssueIds.has(createdIssue.id)) {
+      errors.push(`${issue?.identifier || createdIssue.id}: issue does not appear in the target project's normal issue list`);
+    }
+  }
+  return errors;
 }
 
 async function createLinearIssues(path: string, flags: Record<string, string | boolean>): Promise<number> {
@@ -584,15 +670,28 @@ async function createLinearIssuesLive(issues: Array<{ title: string; description
     console.error(`No Linear project/team found for slug ${projectSlug}.`);
     return 1;
   }
+  const createdIssues: Array<{ id: string; expectedDescription: string }> = [];
   for (const issue of issues) {
     const result = await linearGraphql(apiKey, `
       mutation IssueCreate($input: IssueCreateInput!) {
-        issueCreate(input: $input) { success issue { identifier title url } }
+        issueCreate(input: $input) { success issue { id identifier title url } }
       }
     `, { input: { teamId, projectId, title: issue.title, description: issue.description } });
     const created = result.data?.issueCreate?.issue;
+    if (!result.data?.issueCreate?.success || !created?.id) {
+      console.error(`Failed to create Linear issue: ${issue.title}`);
+      return 1;
+    }
+    createdIssues.push({ id: created.id, expectedDescription: issue.description });
     console.log(`Created ${created?.identifier}: ${created?.url}`);
   }
+  const verificationErrors = await verifyLinearPromotion(apiKey, projectId, projectSlug, createdIssues);
+  if (verificationErrors.length > 0) {
+    console.error("Linear promotion verification failed:");
+    verificationErrors.forEach((error) => console.error(`- ${error}`));
+    return 1;
+  }
+  console.log(`Verified ${createdIssues.length} Linear issue(s) are unarchived, in project ${projectSlug}, and have expected description content.`);
   return 0;
 }
 
@@ -959,11 +1058,13 @@ async function main(): Promise<number> {
   return 1;
 }
 
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((error: unknown) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
+if (fileURLToPath(import.meta.url) === process.argv[1]) {
+  main()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+}

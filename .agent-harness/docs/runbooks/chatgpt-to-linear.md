@@ -90,6 +90,10 @@ Create Linear issues after credentials are configured:
 AGENT_DRY_RUN=false node .agent-harness/dist/cli.js intake promote .agent-harness/intake/compiled/<idea-id>
 ```
 
+The live promotion command verifies that created issues are unarchived, belong
+to the target project, appear in the project's normal issue list, and contain
+the expected promoted description content.
+
 ## 8. Start Agent Work
 
 Only after human review, move selected Linear issues to `Ready for Agent`.
