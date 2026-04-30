@@ -37,8 +37,10 @@ compiled artifact first.
 
 Each promoted issue should include:
 
-- A title prefixed with Idea Pack id and sequence, such as
-  `[example-idea 01/04] Define first workflow`.
+- A title prefixed with sequence only, such as
+  `[01/04] Define first workflow`.
+- A generated Linear label for the Idea Pack id, such as
+  `idea:example-idea`.
 - Source idea.
 - Agent execution order.
 - A concise Idea Context block with summary, core workflows, decisions, risks,
@@ -64,6 +66,7 @@ success:
 - The issue belongs to the target Linear project.
 - The issue appears in the target project's normal issue list.
 - The issue description contains the expected promoted content.
+- The issue has the expected generated Idea Pack label.
 
 If any check fails, promotion should fail loudly so the user can repair Linear
 state before starting agent work.

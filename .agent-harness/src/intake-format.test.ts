@@ -1,16 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
+import { formatIdeaLabelName, formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
 
-test("formats Linear issue titles with Idea Pack source and sequence", () => {
+test("formats Linear issue titles with sequence only", () => {
   assert.equal(
     formatLinearIssueTitle({
-      ideaId: "operator-os-generated-disposable-software",
       title: "Define Operator OS Wave 1 product boundary",
       order: { index: 1, total: 14 },
     }),
-    "[operator-os-generated-disposable-software 01/14] Define Operator OS Wave 1 product boundary",
+    "[01/14] Define Operator OS Wave 1 product boundary",
   );
+});
+
+test("formats generic Idea Pack labels from idea ids", () => {
+  assert.equal(formatIdeaLabelName("operator-os-generated-disposable-software"), "idea:operator-os-generated-disposable-software");
 });
 
 test("renders Linear issue descriptions with concise Idea Context", () => {
