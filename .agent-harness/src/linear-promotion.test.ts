@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -157,6 +157,48 @@ end
   assert.match(patched.text, /:tool_input_auto_answered/);
 
   const repatched = patchSymphonyAppServerSource(patched.text);
+  assert.equal(repatched.changed, false);
+  assert.equal(repatched.text, patched.text);
+});
+
+test("patches Symphony orchestrator to exit after one completed issue for parent publish", () => {
+  const source = `defmodule SymphonyElixir.Orchestrator do
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{running: running} = state
+      ) do
+    case find_issue_id_for_ref(running, ref) do
+      issue_id ->
+        state =
+          case reason do
+            :normal ->
+              Logger.info("Agent task completed")
+
+              state
+              |> complete_issue(issue_id)
+              |> schedule_issue_retry(issue_id, 1, %{
+                identifier: running_entry.identifier,
+                delay_type: :continuation
+              })
+          end
+
+        {:noreply, state}
+    end
+  end
+
+  defp last_activity_timestamp(running_entry) when is_map(running_entry) do
+    Map.get(running_entry, :last_codex_timestamp)
+  end
+end
+`;
+
+  const patched = patchSymphonyOrchestratorSource(source);
+  assert.equal(patched.changed, true);
+  assert.match(patched.text, /SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE/);
+  assert.match(patched.text, /System\.halt\(0\)/);
+  assert.match(patched.text, /maybe_halt_after_agent_harness_one_shot\(issue_id, session_id\)/);
+
+  const repatched = patchSymphonyOrchestratorSource(patched.text);
   assert.equal(repatched.changed, false);
   assert.equal(repatched.text, patched.text);
 });

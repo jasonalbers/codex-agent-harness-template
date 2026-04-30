@@ -38,3 +38,10 @@ The Symphony worker is configured for one Codex turn per issue. A Codex turn can
 run many local tool calls, so the worker should finish implementation and
 verification before it ends the turn. After that turn exits, the parent CLI
 inspects the workspace and publishes the result.
+
+`agent start` runs Symphony in one-issue mode. When the claimed worker task
+completes normally, the harness stops the Symphony process so control returns to
+the parent CLI. The parent CLI must then either publish the workspace and move
+the issue to `Ready to Merge`, or move the issue to `Blocked` with the publish
+error. It must not let Symphony redispatch the same `In Progress` issue after a
+completed worker turn.
