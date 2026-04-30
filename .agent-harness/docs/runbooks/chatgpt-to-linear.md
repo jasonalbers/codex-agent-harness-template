@@ -92,13 +92,19 @@ AGENT_DRY_RUN=false node .agent-harness/dist/cli.js intake promote .agent-harnes
 
 The live promotion command verifies that created issues are unarchived, belong
 to the target project, appear in the project's normal issue list, and contain
-the expected promoted description content.
+the expected promoted description content and generated Idea Pack label.
 
-Promoted issue titles include the Idea Pack id and sequence so the source and
-order are visible in Linear list views:
+Promoted issue titles include the sequence so order is visible without crowding
+Linear list views:
 
 ```text
-[example-idea 01/04] Define first workflow
+[01/04] Define first workflow
+```
+
+The source Idea Pack is attached as a generated Linear label:
+
+```text
+idea:example-idea
 ```
 
 ## 8. Start Agent Work

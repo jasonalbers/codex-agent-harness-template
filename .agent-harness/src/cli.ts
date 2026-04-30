@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
+import { formatIdeaLabelName, formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
 import { handleTemplateCommand } from "./template-sync.js";
 
 type ParsedArgs = {
@@ -58,6 +58,9 @@ type CreatedLinearIssue = {
   project?: {
     id?: string;
     slugId?: string;
+  } | null;
+  labels?: {
+    nodes?: Array<{ name?: string | null }>;
   } | null;
 };
 
@@ -559,9 +562,15 @@ function summarizeProjects(): number {
   return 0;
 }
 
-function parseMarkdownIssues(path: string): Array<{ title: string; description: string }> {
+type IssueBundleItem = {
+  title: string;
+  description: string;
+  labels?: string[];
+};
+
+function parseMarkdownIssues(path: string): IssueBundleItem[] {
   const text = readFileSync(path, "utf8");
-  const issues: Array<{ title: string; description: string }> = [];
+  const issues: IssueBundleItem[] = [];
   const chunks = text.split(/^##\s+/m).slice(1);
   for (const chunk of chunks) {
     const [title = "", ...rest] = chunk.trim().split(/\r?\n/);
@@ -570,12 +579,46 @@ function parseMarkdownIssues(path: string): Array<{ title: string; description: 
   return issues;
 }
 
-function loadIssueBundle(path: string): Array<{ title: string; description: string }> {
+function loadIssueBundle(path: string): IssueBundleItem[] {
   if (path.endsWith(".json")) {
     const data = readJson<any>(path);
     return Array.isArray(data) ? data : data.issues ?? [];
   }
   return parseMarkdownIssues(path);
+}
+
+export function linearIssueLabelsInput(labels: string[] | undefined): string[] | undefined {
+  const names = (labels ?? []).map((label) => label.trim()).filter(Boolean);
+  return names.length > 0 ? names : undefined;
+}
+
+async function resolveLinearIssueLabelIds(apiKey: string, teamId: string, labelNames: string[]): Promise<string[]> {
+  const ids: string[] = [];
+  for (const name of labelNames) {
+    const existing = await linearGraphql(apiKey, `
+      query IssueLabelByName($name: String!, $teamId: ID!) {
+        issueLabels(first: 1, filter: { name: { eq: $name }, team: { id: { eq: $teamId } } }) {
+          nodes { id name }
+        }
+      }
+    `, { name, teamId });
+    const existingId = existing.data?.issueLabels?.nodes?.[0]?.id;
+    if (existingId) {
+      ids.push(existingId);
+      continue;
+    }
+    const created = await linearGraphql(apiKey, `
+      mutation IssueLabelCreate($input: IssueLabelCreateInput!) {
+        issueLabelCreate(input: $input) { success issueLabel { id name } }
+      }
+    `, { input: { name, teamId } });
+    const createdId = created.data?.issueLabelCreate?.issueLabel?.id;
+    if (!created.data?.issueLabelCreate?.success || !createdId) {
+      throw new Error(`Failed to create Linear issue label: ${name}`);
+    }
+    ids.push(createdId);
+  }
+  return ids;
 }
 
 function issueNumber(identifier: string): number {
@@ -626,7 +669,7 @@ function descriptionMarkers(description: string): string[] {
   return firstLine ? [firstLine] : [];
 }
 
-export function verifyCreatedLinearIssue(issue: CreatedLinearIssue, expected: { projectId: string; description: string }): string[] {
+export function verifyCreatedLinearIssue(issue: CreatedLinearIssue, expected: { projectId: string; description: string; labels?: string[] }): string[] {
   const label = issue.identifier || issue.title || issue.id || "unknown issue";
   const errors: string[] = [];
   if (!issue.id) errors.push(`${label}: missing Linear issue id`);
@@ -637,6 +680,10 @@ export function verifyCreatedLinearIssue(issue: CreatedLinearIssue, expected: { 
   const actualDescription = issue.description || "";
   for (const marker of descriptionMarkers(expected.description)) {
     if (!actualDescription.includes(marker)) errors.push(`${label}: description is missing marker ${marker}`);
+  }
+  const actualLabels = new Set((issue.labels?.nodes ?? []).map((node) => node.name).filter(Boolean));
+  for (const expectedLabel of expected.labels ?? []) {
+    if (!actualLabels.has(expectedLabel)) errors.push(`${label}: missing label ${expectedLabel}`);
   }
   return errors;
 }
@@ -662,7 +709,7 @@ async function fetchProjectIssueIds(apiKey: string, projectId: string): Promise<
   return ids;
 }
 
-async function verifyLinearPromotion(apiKey: string, projectId: string, projectSlug: string, created: Array<{ id: string; expectedDescription: string }>): Promise<string[]> {
+async function verifyLinearPromotion(apiKey: string, projectId: string, projectSlug: string, created: Array<{ id: string; expectedDescription: string; expectedLabels?: string[] }>): Promise<string[]> {
   const errors: string[] = [];
   const projectIssueIds = await fetchProjectIssueIds(apiKey, projectId);
   for (const createdIssue of created) {
@@ -675,11 +722,12 @@ async function verifyLinearPromotion(apiKey: string, projectId: string, projectS
           archivedAt
           description
           project { id slugId }
+          labels(first: 20) { nodes { name } }
         }
       }
     `, { id: createdIssue.id });
     const issue = result.data?.issue as CreatedLinearIssue | undefined;
-    errors.push(...verifyCreatedLinearIssue(issue ?? {}, { projectId, description: createdIssue.expectedDescription }));
+    errors.push(...verifyCreatedLinearIssue(issue ?? {}, { projectId, description: createdIssue.expectedDescription, labels: createdIssue.expectedLabels }));
     if (!projectIssueIds.has(createdIssue.id)) {
       errors.push(`${issue?.identifier || createdIssue.id}: issue does not appear in the target project's normal issue list`);
     }
@@ -778,7 +826,7 @@ async function createLinearIssues(path: string, flags: Record<string, string | b
   return createLinearIssuesLive(issues, apiKey, projectSlug);
 }
 
-async function createLinearIssuesLive(issues: Array<{ title: string; description: string }>, apiKey: string, projectSlug: string): Promise<number> {
+async function createLinearIssuesLive(issues: IssueBundleItem[], apiKey: string, projectSlug: string): Promise<number> {
   if (!apiKey || !projectSlug) {
     console.error("LINEAR_API_KEY and LINEAR_PROJECT_SLUG are required for live issue creation.");
     return 1;
@@ -797,19 +845,26 @@ async function createLinearIssuesLive(issues: Array<{ title: string; description
     console.error(`No Linear project/team found for slug ${projectSlug}.`);
     return 1;
   }
-  const createdIssues: Array<{ id: string; expectedDescription: string }> = [];
+  const labelIdsByName = new Map<string, string>();
+  for (const labelName of [...new Set(issues.flatMap((issue) => issue.labels ?? []))]) {
+    const [labelId] = await resolveLinearIssueLabelIds(apiKey, teamId, [labelName]);
+    labelIdsByName.set(labelName, labelId);
+  }
+  const createdIssues: Array<{ id: string; expectedDescription: string; expectedLabels?: string[] }> = [];
   for (const issue of issues) {
+    const labelNames = linearIssueLabelsInput(issue.labels) ?? [];
+    const labelIds = labelNames.map((label) => labelIdsByName.get(label)).filter((id): id is string => Boolean(id));
     const result = await linearGraphql(apiKey, `
       mutation IssueCreate($input: IssueCreateInput!) {
         issueCreate(input: $input) { success issue { id identifier title url } }
       }
-    `, { input: { teamId, projectId, title: issue.title, description: issue.description } });
+    `, { input: { teamId, projectId, title: issue.title, description: issue.description, labelIds } });
     const created = result.data?.issueCreate?.issue;
     if (!result.data?.issueCreate?.success || !created?.id) {
       console.error(`Failed to create Linear issue: ${issue.title}`);
       return 1;
     }
-    createdIssues.push({ id: created.id, expectedDescription: issue.description });
+    createdIssues.push({ id: created.id, expectedDescription: issue.description, expectedLabels: labelNames });
     console.log(`Created ${created?.identifier}: ${created?.url}`);
   }
   const verificationErrors = await verifyLinearPromotion(apiKey, projectId, projectSlug, createdIssues);
@@ -951,10 +1006,10 @@ function writeCompiledPack(pack: IdeaPack, outDir: string): void {
   mkdirSync(outDir, { recursive: true });
   const issues = pack.issues.map((issue, index) => ({
     title: formatLinearIssueTitle({
-      ideaId: pack.metadata.idea_id,
       title: issue.title,
       order: { index: index + 1, total: pack.issues.length },
     }),
+    labels: [formatIdeaLabelName(pack.metadata.idea_id)],
     description: issueDescription(issue, pack, { index: index + 1, total: pack.issues.length }),
   }));
   writeFileSync(join(outDir, "source-idea-pack.md"), pack.raw, "utf8");
@@ -963,7 +1018,7 @@ function writeCompiledPack(pack: IdeaPack, outDir: string): void {
   writeFileSync(join(outDir, "linear-issues.json"), `${JSON.stringify({ issues }, null, 2)}\n`, "utf8");
   writeFileSync(join(outDir, "linear-issues.md"), ["# Linear Issue Bundle", "", `Source idea: ${pack.metadata.idea_name}`, "", ...pack.issues.flatMap((issue, index) => {
     const order = { index: index + 1, total: pack.issues.length };
-    return [`## Issue: ${formatLinearIssueTitle({ ideaId: pack.metadata.idea_id, title: issue.title, order })}`, "", issueDescription(issue, pack, order), ""];
+    return [`## Issue: ${formatLinearIssueTitle({ title: issue.title, order })}`, "", `Labels: ${formatIdeaLabelName(pack.metadata.idea_id)}`, "", issueDescription(issue, pack, order), ""];
   })].join("\n"), "utf8");
   writeFileSync(join(outDir, "promotion-report.md"), ["# Promotion Report", "", `- Idea ID: ${pack.metadata.idea_id}`, `- Idea name: ${pack.metadata.idea_name}`, `- Issues ready for Linear: ${pack.issues.length}`, "", "## Human Review Checklist", "", "- [ ] Idea Pack validation passed.", "- [ ] Open questions are answered or explicitly deferred.", "- [ ] Deferred ideas are preserved.", "- [ ] Each issue is small enough for one pull request.", "- [ ] Created Linear issues should not be moved to Ready for Agent until reviewed."].join("\n"), "utf8");
 }

@@ -20,7 +20,6 @@ export type LinearIssueDescriptionInput = {
 };
 
 export type LinearIssueTitleInput = {
-  ideaId: string;
   title: string;
   order: {
     index: number;
@@ -60,7 +59,11 @@ function padOrder(value: number, total: number): string {
 
 export function formatLinearIssueTitle(input: LinearIssueTitleInput): string {
   const sequence = `${padOrder(input.order.index, input.order.total)}/${padOrder(input.order.total, input.order.total)}`;
-  return `[${input.ideaId} ${sequence}] ${input.title}`;
+  return `[${sequence}] ${input.title}`;
+}
+
+export function formatIdeaLabelName(ideaId: string): string {
+  return `idea:${ideaId}`;
 }
 
 function renderAgentExecutionOrder(order: { index: number; total: number } | undefined): string[] {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { linearIssueLabelsInput, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -9,9 +9,11 @@ test("verifies promoted Linear issues are unarchived and in the target project",
     archivedAt: null,
     description: "## Source Idea\n\n## Idea Context\n\n## Notes For Agent",
     project: { id: "project-id", slugId: "de2afd8fca7c" },
+    labels: { nodes: [{ name: "idea:operator-os-generated-disposable-software" }] },
   }, {
     projectId: "project-id",
     description: "## Source Idea\n\n## Idea Context\n\n## Notes For Agent",
+    labels: ["idea:operator-os-generated-disposable-software"],
   });
 
   assert.deepEqual(errors, []);
@@ -40,4 +42,9 @@ test("validation text scan ignores local secret files", () => {
   assert.equal(textFilesForValidation(".agent-harness/config/projects.local.json"), false);
   assert.equal(textFilesForValidation(".agent-harness/config/projects.private.json"), false);
   assert.equal(textFilesForValidation(".agent-harness/config/projects.example.json"), true);
+});
+
+test("passes issue label names to Linear create input", () => {
+  assert.deepEqual(linearIssueLabelsInput(["idea:operator-os-generated-disposable-software"]), ["idea:operator-os-generated-disposable-software"]);
+  assert.equal(linearIssueLabelsInput(undefined), undefined);
 });
