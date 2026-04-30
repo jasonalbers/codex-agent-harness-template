@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -64,20 +64,31 @@ test("accepts Codex auth file as worker authentication", () => {
   });
 });
 
-test("accepts GitHub CLI auth when GITHUB_TOKEN is not set", () => {
-  assert.deepEqual(githubAuthStatus({}, () => ({ code: 0, output: "gh-token\n" })), {
+test("accepts GitHub CLI auth without exporting a token", () => {
+  assert.deepEqual(githubAuthStatus({}, () => ({ code: 0, output: "Logged in to github.com\n" })), {
     ok: true,
-    source: "gh auth token",
-    token: "gh-token",
+    source: "gh auth status",
   });
-  assert.deepEqual(githubAuthStatus({ GITHUB_TOKEN: "ignored" }, () => ({ code: 0, output: "gh-token\n" })), {
+  assert.deepEqual(githubAuthStatus({ GITHUB_TOKEN: "ignored" }, () => ({ code: 0, output: "Logged in to github.com\n" })), {
     ok: true,
-    source: "gh auth token",
-    token: "gh-token",
+    source: "gh auth status",
   });
   assert.deepEqual(githubAuthStatus({}, () => ({ code: 1, output: "not logged in" })), {
     ok: false,
-    source: "gh auth token",
+    source: "gh auth status",
+  });
+});
+
+test("publish preflight reports setup blockers before claiming work", () => {
+  assert.deepEqual(publishPreflight("owner/repo", ""), {
+    ok: false,
+    checked: [],
+    blockers: ["AGENT_WORKSPACE_ROOT is not set"],
+  });
+  assert.deepEqual(publishPreflight("replace-with-owner/repo", "/tmp"), {
+    ok: false,
+    checked: [],
+    blockers: ["project repo is missing or a placeholder"],
   });
 });
 

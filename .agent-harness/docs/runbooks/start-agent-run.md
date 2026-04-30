@@ -8,7 +8,7 @@
 node .agent-harness/dist/cli.js agent start --project example-app --dry-run
 ```
 
-4. Review the planned workspace, branch, repo, and issue.
+4. Review the planned workspace, repo, issue, and publish preflight result.
 5. Disable dry-run only after credentials and workflow are verified:
 
 ```bash
@@ -18,6 +18,11 @@ AGENT_DRY_RUN=false node .agent-harness/dist/cli.js agent start --project exampl
 Live `agent start` is the explicit trusted local runner entry point. After the
 readiness checks pass, it supplies Symphony's required unattended guardrail
 acknowledgement flag to the pinned upstream binary.
+
+The dry run performs the same local publish-environment checks before a live
+run claims work. It verifies `gh auth status`, target repo visibility, a
+disposable clone under `AGENT_WORKSPACE_ROOT`, local branch creation, writable
+`.git` metadata, and a `git push --dry-run` for the publish branch.
 
 ## Ordered Ready Issues
 
