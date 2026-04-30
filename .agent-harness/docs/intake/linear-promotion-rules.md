@@ -51,3 +51,16 @@ artifacts for deeper review.
 Created Linear issues should begin outside active agent execution. Move them to
 `Ready for Agent` only after a human review confirms the issue is small, clear,
 and safe for an agent run.
+
+## Promotion Verification
+
+After live promotion, the CLI should verify each created issue before reporting
+success:
+
+- The issue is not archived.
+- The issue belongs to the target Linear project.
+- The issue appears in the target project's normal issue list.
+- The issue description contains the expected promoted content.
+
+If any check fails, promotion should fail loudly so the user can repair Linear
+state before starting agent work.
