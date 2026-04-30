@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { renderLinearIssueDescription } from "./intake-format.js";
 import { handleTemplateCommand } from "./template-sync.js";
 
 type ParsedArgs = {
@@ -653,7 +654,7 @@ function parseIdeaPack(path: string): IdeaPack {
 
 function parseIssueField(text: string, field: string): string {
   const escaped = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = text.match(new RegExp(`^####\\s+${escaped}\\s*\\n([\\s\\S]*?)(?=^####\\s+|$)`, "m"));
+  const match = text.match(new RegExp(`(?:^|\\r?\\n)####\\s+${escaped}\\s*\\r?\\n([\\s\\S]*?)(?=\\r?\\n####\\s+|$)`));
   return match ? match[1].trim() : "";
 }
 
@@ -717,16 +718,7 @@ function printIdeaValidation(result: ValidationResult): void {
 }
 
 function issueDescription(issue: LinearIssue, pack: IdeaPack): string {
-  return [
-    "## Source Idea", "", `- Idea: ${pack.metadata.idea_name}`, `- Idea ID: ${pack.metadata.idea_id}`, "",
-    "## Goal", "", issue.goal, "",
-    "## User Value", "", issue.userValue, "",
-    "## Acceptance Criteria", "", ...issue.acceptanceCriteria, "",
-    "## Out Of Scope", "", issue.outOfScope, "",
-    "## Dependencies", "", issue.dependencies, "",
-    "## Verification", "", issue.verification, "",
-    "## Notes For Agent", "", issue.notesForAgent,
-  ].join("\n");
+  return renderLinearIssueDescription({ metadata: pack.metadata, sections: pack.sections, issue });
 }
 
 function writeCompiledPack(pack: IdeaPack, outDir: string): void {

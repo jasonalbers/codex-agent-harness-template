@@ -29,6 +29,23 @@ An Idea Pack can be promoted when:
 - Issues that require more than one pull request.
 - Ideas that belong in the deferred ledger.
 
+## Linear Issue Description Context
+
+Linear issue descriptions should include enough Idea Pack context for an
+implementation agent to understand why the issue exists without opening every
+compiled artifact first.
+
+Each promoted issue should include:
+
+- Source idea.
+- A concise Idea Context block with summary, core workflows, decisions, risks,
+  open questions, and deferred ideas.
+- The issue-specific goal, user value, acceptance criteria, out of scope,
+  dependencies, verification, and notes for agent.
+
+The complete Idea Pack and conversation ledger remain in the compiled local
+artifacts for deeper review.
+
 ## Status Rule
 
 Created Linear issues should begin outside active agent execution. Move them to
