@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { formatIdeaLabelName, formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
 import { handleTemplateCommand } from "./template-sync.js";
 
@@ -328,6 +329,12 @@ function projectByName(name: string): Project | undefined {
   return loadProjects().projects.find((project) => project.name === name);
 }
 
+export function codexAuthStatus(values: Record<string, string>, fileExists: (path: string) => boolean = existsSync): { ok: boolean; source: string } {
+  const configuredPath = values.CODEX_AUTH_FILE || join(homedir(), ".codex", "auth.json");
+  const source = values.CODEX_AUTH_FILE || "~/.codex/auth.json";
+  return { ok: fileExists(configuredPath), source };
+}
+
 function validateEnv(flags: Record<string, string | boolean>): number {
   const dotenv = loadDotenv();
   const softDefaults = {
@@ -336,10 +343,11 @@ function validateEnv(flags: Record<string, string | boolean>): number {
     SYMPHONY_REPO: "https://github.com/openai/symphony.git",
     SYMPHONY_REF: "58cf97da06d556c019ccea20c67f4f77da124bf3",
   };
-  const liveRequired = ["LINEAR_API_KEY", "LINEAR_PROJECT_SLUG", "GITHUB_REPO", "GITHUB_TOKEN", "OPENAI_API_KEY", "AGENT_WORKSPACE_ROOT"];
+  const liveRequired = ["LINEAR_API_KEY", "LINEAR_PROJECT_SLUG", "GITHUB_REPO", "GITHUB_TOKEN", "AGENT_WORKSPACE_ROOT"];
   const dryRun = Boolean(flags["dry-run"]) || boolValue(env("AGENT_DRY_RUN", dotenv), true);
   const strict = Boolean(flags.strict) || !dryRun;
   const missing: string[] = [];
+  const merged = { ...process.env, ...dotenv } as Record<string, string>;
 
   for (const [name, defaultValue] of Object.entries(softDefaults)) {
     printCheck(true, `${name} is ${env(name, dotenv) ? "set" : `defaulting to ${defaultValue}`}`);
@@ -352,6 +360,13 @@ function validateEnv(flags: Record<string, string | boolean>): number {
     } else {
       printCheck(true, `${name} is ${value ? "set" : "not set; acceptable in dry-run mode"}`);
     }
+  }
+  const codexAuth = codexAuthStatus(merged);
+  if (strict && !codexAuth.ok) {
+    missing.push("CODEX_AUTH_FILE");
+    printCheck(false, `Codex auth file is required at ${codexAuth.source}`);
+  } else {
+    printCheck(true, `Codex auth file ${codexAuth.ok ? `found at ${codexAuth.source}` : `not found at ${codexAuth.source}; acceptable in dry-run mode`}`);
   }
 
   if (missing.length > 0) {
@@ -542,7 +557,7 @@ function bootstrapProject(flags: Record<string, string | boolean>): number {
 function summarizeProjects(): number {
   const dotenv = loadDotenv();
   const config = loadProjects();
-  const envRequirements = ["LINEAR_API_KEY", "GITHUB_TOKEN", "OPENAI_API_KEY", "AGENT_WORKSPACE_ROOT"];
+  const envRequirements = ["LINEAR_API_KEY", "GITHUB_TOKEN", "AGENT_WORKSPACE_ROOT"];
   console.log(`Configured projects: ${config.projects.length}`);
   for (const project of config.projects) {
     const missing: string[] = [];
@@ -1190,9 +1205,11 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const blockers: string[] = [];
   if (!project.agent_enabled) blockers.push("project agent_enabled is false");
   if (isPlaceholder(project.linear_project_slug)) blockers.push("project Linear slug is a placeholder");
-  for (const name of ["LINEAR_API_KEY", "GITHUB_TOKEN", "OPENAI_API_KEY", "AGENT_WORKSPACE_ROOT"]) {
+  for (const name of ["LINEAR_API_KEY", "GITHUB_TOKEN", "AGENT_WORKSPACE_ROOT"]) {
     if (!env(name, dotenv)) blockers.push(`${name} is not set`);
   }
+  const codexAuth = codexAuthStatus({ ...process.env, ...dotenv } as Record<string, string>);
+  if (!codexAuth.ok) blockers.push(`Codex auth file is not available at ${codexAuth.source}`);
   const runEnv = {
     LINEAR_PROJECT_SLUG: project.linear_project_slug,
     GITHUB_REPO: project.repo,

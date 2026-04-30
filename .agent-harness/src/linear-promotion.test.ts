@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { linearIssueLabelsInput, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { codexAuthStatus, linearIssueLabelsInput, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -47,4 +47,19 @@ test("validation text scan ignores local secret files", () => {
 test("passes issue label names to Linear create input", () => {
   assert.deepEqual(linearIssueLabelsInput(["idea:operator-os-generated-disposable-software"]), ["idea:operator-os-generated-disposable-software"]);
   assert.equal(linearIssueLabelsInput(undefined), undefined);
+});
+
+test("accepts Codex auth file as worker authentication", () => {
+  assert.deepEqual(codexAuthStatus({}, () => true), {
+    ok: true,
+    source: "~/.codex/auth.json",
+  });
+  assert.deepEqual(codexAuthStatus({ CODEX_AUTH_FILE: "/tmp/codex-auth.json" }, (path: string) => path === "/tmp/codex-auth.json"), {
+    ok: true,
+    source: "/tmp/codex-auth.json",
+  });
+  assert.deepEqual(codexAuthStatus({ OPENAI_API_KEY: "set" }, () => false), {
+    ok: false,
+    source: "~/.codex/auth.json",
+  });
 });
