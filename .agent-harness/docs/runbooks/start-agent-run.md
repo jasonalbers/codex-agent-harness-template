@@ -36,6 +36,11 @@ The worker is intentionally limited to one Codex turn. That turn may include
 many tool calls, but when it exits the parent CLI must regain control for
 publish and lifecycle updates.
 
+Live `agent start` sets `SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1` for the
+bootstrapped Symphony process. That compatibility mode stops Symphony after the
+claimed worker task completes normally, so the daemon poll loop cannot
+redispatch the same `In Progress` issue before parent publish runs.
+
 ## Ordered Ready Issues
 
 If multiple promoted issues are set to `Ready for Agent`, `agent start` keeps

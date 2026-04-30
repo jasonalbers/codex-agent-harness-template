@@ -1474,6 +1474,7 @@ function symphonyRoot(): string {
 }
 
 const SYMPHONY_MCP_ELICITATION_PATCH_MARKER = "mcpServer/elicitation/request";
+const SYMPHONY_SINGLE_ISSUE_PATCH_MARKER = "SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE";
 
 const SYMPHONY_MCP_ELICITATION_PATCH = `  defp maybe_handle_approval_request(
          port,
@@ -1521,10 +1522,52 @@ export function patchSymphonyAppServerSource(source: string): { text: string; ch
   };
 }
 
+const SYMPHONY_SINGLE_ISSUE_HELPERS_PATCH = `
+  defp maybe_halt_after_agent_harness_one_shot(issue_id, session_id) do
+    if System.get_env("SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE") == "1" do
+      Logger.info("Agent harness one-issue mode completed issue_id=#{issue_id} session_id=#{session_id}; stopping Symphony so parent CLI can publish")
+      System.halt(0)
+    end
+  end
+
+`;
+
+export function patchSymphonyOrchestratorSource(source: string): { text: string; changed: boolean } {
+  if (source.includes(SYMPHONY_SINGLE_ISSUE_PATCH_MARKER)) {
+    return { text: source, changed: false };
+  }
+
+  const helperAnchor = "  defp last_activity_timestamp(running_entry) when is_map(running_entry) do\n";
+  const completionAnchor = "              state\n              |> complete_issue(issue_id)\n              |> schedule_issue_retry(issue_id, 1, %{";
+
+  if (!source.includes(helperAnchor)) {
+    throw new Error("Could not find Symphony orchestrator helper anchor.");
+  }
+  if (!source.includes(completionAnchor)) {
+    throw new Error("Could not find Symphony orchestrator normal-completion anchor.");
+  }
+
+  return {
+    text: source
+      .replace(helperAnchor, SYMPHONY_SINGLE_ISSUE_HELPERS_PATCH + helperAnchor)
+      .replace(completionAnchor, [
+        "              maybe_halt_after_agent_harness_one_shot(issue_id, session_id)",
+        "",
+        completionAnchor,
+      ].join("\n")),
+    changed: true,
+  };
+}
+
 function applySymphonyCompatibilityPatches(upstream: string): { ok: boolean; changed: boolean } {
   const appServerPath = join(upstream, "elixir", "lib", "symphony_elixir", "codex", "app_server.ex");
+  const orchestratorPath = join(upstream, "elixir", "lib", "symphony_elixir", "orchestrator.ex");
   if (!existsSync(appServerPath)) {
     console.error(`Missing Symphony app-server source: ${appServerPath}`);
+    return { ok: false, changed: false };
+  }
+  if (!existsSync(orchestratorPath)) {
+    console.error(`Missing Symphony orchestrator source: ${orchestratorPath}`);
     return { ok: false, changed: false };
   }
 
@@ -1535,7 +1578,14 @@ function applySymphonyCompatibilityPatches(upstream: string): { ok: boolean; cha
       writeFileSync(appServerPath, patched.text, "utf8");
       console.log("Applied Symphony compatibility patch: decline unattended MCP elicitation requests.");
     }
-    return { ok: true, changed: patched.changed };
+
+    const orchestratorSource = readFileSync(orchestratorPath, "utf8");
+    const orchestratorPatched = patchSymphonyOrchestratorSource(orchestratorSource);
+    if (orchestratorPatched.changed) {
+      writeFileSync(orchestratorPath, orchestratorPatched.text, "utf8");
+      console.log("Applied Symphony compatibility patch: stop one-issue agent runs after worker completion.");
+    }
+    return { ok: true, changed: patched.changed || orchestratorPatched.changed };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Failed to apply Symphony compatibility patch: ${message}`);
@@ -1702,6 +1752,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     CODEX_MODEL: env("CODEX_MODEL", dotenv) || "gpt-5.5",
     CODEX_APPROVAL_POLICY: env("CODEX_APPROVAL_POLICY", dotenv) || "never",
     AGENT_MAX_PARALLEL_RUNS: env("AGENT_MAX_PARALLEL_RUNS", dotenv) || "1",
+    SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE: "1",
   };
   console.log(`Project: ${project.name}`);
   console.log(`GitHub repo: ${project.repo}`);
@@ -1718,6 +1769,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     console.log(`- CODEX_MODEL: ${runEnv.CODEX_MODEL}`);
     console.log(`- CODEX_APPROVAL_POLICY: ${runEnv.CODEX_APPROVAL_POLICY}`);
     console.log(`- AGENT_MAX_PARALLEL_RUNS: ${runEnv.AGENT_MAX_PARALLEL_RUNS}`);
+    console.log(`- SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE: ${runEnv.SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE}`);
     console.log(`- Publish preflight: ${publishCheck.ok ? "passed" : "failed"}`);
     publishCheck.checked.forEach((check) => console.log(`  - ${check}`));
     console.log("- Secrets: not printed");
