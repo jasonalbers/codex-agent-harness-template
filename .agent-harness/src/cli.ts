@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -380,6 +380,10 @@ function repoCloneUrl(repo: string): string {
   return `git@github.com:${repo}.git`;
 }
 
+function resolveWorkspaceRoot(workspaceRoot: string): string {
+  return isAbsolute(workspaceRoot) ? workspaceRoot : resolve(PROJECT_ROOT, workspaceRoot);
+}
+
 function runQuiet(command: string, args: string[], cwd = PROJECT_ROOT, extraEnv: Record<string, string> = {}): { ok: boolean; output: string } {
   const childEnv = { ...process.env, ...extraEnv };
   delete childEnv.GITHUB_TOKEN;
@@ -405,11 +409,14 @@ export function publishPreflight(repo: string, workspaceRoot: string, envValues:
   if (!workspaceRoot) {
     return { ok: false, checked, blockers: ["AGENT_WORKSPACE_ROOT is not set"] };
   }
-  if (!existsSync(workspaceRoot)) {
-    return { ok: false, checked, blockers: [`AGENT_WORKSPACE_ROOT does not exist: ${workspaceRoot}`] };
+  const resolvedWorkspaceRoot = resolveWorkspaceRoot(workspaceRoot);
+  try {
+    mkdirSync(resolvedWorkspaceRoot, { recursive: true });
+  } catch {
+    return { ok: false, checked, blockers: [`AGENT_WORKSPACE_ROOT cannot be created: ${resolvedWorkspaceRoot}`] };
   }
-  if (!statSync(workspaceRoot).isDirectory()) {
-    return { ok: false, checked, blockers: [`AGENT_WORKSPACE_ROOT is not a directory: ${workspaceRoot}`] };
+  if (!statSync(resolvedWorkspaceRoot).isDirectory()) {
+    return { ok: false, checked, blockers: [`AGENT_WORKSPACE_ROOT is not a directory: ${resolvedWorkspaceRoot}`] };
   }
 
   const gitVersion = runQuiet("git", ["--version"], PROJECT_ROOT, envValues);
@@ -428,7 +435,7 @@ export function publishPreflight(repo: string, workspaceRoot: string, envValues:
     return { ok: false, checked, blockers };
   }
 
-  const probeDir = mkdtempSync(join(workspaceRoot, ".publish-preflight-"));
+  const probeDir = mkdtempSync(join(resolvedWorkspaceRoot, ".publish-preflight-"));
   const branchName = `codex/preflight-${Date.now()}`;
   try {
     const clone = runQuiet("git", ["clone", "--depth", "1", repoCloneUrl(repo), "."], probeDir, envValues);
@@ -462,7 +469,7 @@ export function publishPreflight(repo: string, workspaceRoot: string, envValues:
     rmSync(probeDir, { recursive: true, force: true });
   }
 
-  return { ok: blockers.length === 0, checked, blockers, workspace: workspaceRoot };
+  return { ok: blockers.length === 0, checked, blockers, workspace: resolvedWorkspaceRoot };
 }
 
 function validateEnv(flags: Record<string, string | boolean>): number {
@@ -1520,8 +1527,9 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const githubAuth = githubAuthStatus(mergedEnv);
   if (!githubAuth.ok) blockers.push("GitHub auth is not available from gh auth status");
   const workspaceRoot = env("AGENT_WORKSPACE_ROOT", dotenv);
+  const resolvedWorkspaceRoot = workspaceRoot ? resolveWorkspaceRoot(workspaceRoot) : "";
   const publishCheck = blockers.length === 0 || workspaceRoot
-    ? publishPreflight(project.repo, workspaceRoot, mergedEnv)
+    ? publishPreflight(project.repo, resolvedWorkspaceRoot, mergedEnv)
     : { ok: false, checked: [], blockers: [] };
   for (const blocker of publishCheck.blockers) {
     blockers.push(`publish preflight: ${blocker}`);
@@ -1529,6 +1537,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const runEnv = {
     LINEAR_PROJECT_SLUG: project.linear_project_slug,
     GITHUB_REPO: project.repo,
+    AGENT_WORKSPACE_ROOT: resolvedWorkspaceRoot,
     CODEX_MODEL: env("CODEX_MODEL", dotenv) || "gpt-5.5",
     CODEX_APPROVAL_POLICY: env("CODEX_APPROVAL_POLICY", dotenv) || "never",
     AGENT_MAX_PARALLEL_RUNS: env("AGENT_MAX_PARALLEL_RUNS", dotenv) || "1",
@@ -1544,6 +1553,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     console.log("Resolved live runner inputs:");
     console.log(`- LINEAR_PROJECT_SLUG: ${runEnv.LINEAR_PROJECT_SLUG}`);
     console.log(`- GITHUB_REPO: ${runEnv.GITHUB_REPO}`);
+    console.log(`- AGENT_WORKSPACE_ROOT: ${runEnv.AGENT_WORKSPACE_ROOT}`);
     console.log(`- CODEX_MODEL: ${runEnv.CODEX_MODEL}`);
     console.log(`- CODEX_APPROVAL_POLICY: ${runEnv.CODEX_APPROVAL_POLICY}`);
     console.log(`- AGENT_MAX_PARALLEL_RUNS: ${runEnv.AGENT_MAX_PARALLEL_RUNS}`);
