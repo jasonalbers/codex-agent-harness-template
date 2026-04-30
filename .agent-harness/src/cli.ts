@@ -365,6 +365,7 @@ function validateEnv(flags: Record<string, string | boolean>): number {
   const dotenv = loadDotenv();
   const softDefaults = {
     CODEX_MODEL: "gpt-5.5",
+    CODEX_APPROVAL_POLICY: "never",
     AGENT_DRY_RUN: "true",
     SYMPHONY_REPO: "https://github.com/openai/symphony.git",
     SYMPHONY_REF: "58cf97da06d556c019ccea20c67f4f77da124bf3",
@@ -1252,18 +1253,24 @@ function symphonyPreflight(): number {
   return 0;
 }
 
-function generateWorkflow(envValues: Record<string, string>): string {
-  const runtimeDir = join(HARNESS_ROOT, ".runtime");
-  mkdirSync(runtimeDir, { recursive: true });
+export function renderWorkflow(envValues: Record<string, string>): string {
   let text = readFileSync(join(HARNESS_ROOT, "WORKFLOW.md"), "utf8");
   for (const [key, value] of Object.entries({
     "__LINEAR_PROJECT_SLUG__": envValues.LINEAR_PROJECT_SLUG,
     "__GITHUB_REPO__": envValues.GITHUB_REPO,
     "__CODEX_MODEL__": envValues.CODEX_MODEL || "gpt-5.5",
+    "__CODEX_APPROVAL_POLICY__": envValues.CODEX_APPROVAL_POLICY || "never",
     "__AGENT_MAX_PARALLEL_RUNS__": envValues.AGENT_MAX_PARALLEL_RUNS || "1",
   })) {
     text = text.replaceAll(key, value);
   }
+  return text;
+}
+
+function generateWorkflow(envValues: Record<string, string>): string {
+  const runtimeDir = join(HARNESS_ROOT, ".runtime");
+  mkdirSync(runtimeDir, { recursive: true });
+  const text = renderWorkflow(envValues);
   const out = join(runtimeDir, "WORKFLOW.generated.md");
   writeFileSync(out, text, "utf8");
   return out;
@@ -1329,6 +1336,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     GITHUB_REPO: project.repo,
     ...(githubAuth.token ? { GITHUB_TOKEN: githubAuth.token } : {}),
     CODEX_MODEL: env("CODEX_MODEL", dotenv) || "gpt-5.5",
+    CODEX_APPROVAL_POLICY: env("CODEX_APPROVAL_POLICY", dotenv) || "never",
     AGENT_MAX_PARALLEL_RUNS: env("AGENT_MAX_PARALLEL_RUNS", dotenv) || "1",
   };
   console.log(`Project: ${project.name}`);
@@ -1343,6 +1351,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     console.log(`- LINEAR_PROJECT_SLUG: ${runEnv.LINEAR_PROJECT_SLUG}`);
     console.log(`- GITHUB_REPO: ${runEnv.GITHUB_REPO}`);
     console.log(`- CODEX_MODEL: ${runEnv.CODEX_MODEL}`);
+    console.log(`- CODEX_APPROVAL_POLICY: ${runEnv.CODEX_APPROVAL_POLICY}`);
     console.log(`- AGENT_MAX_PARALLEL_RUNS: ${runEnv.AGENT_MAX_PARALLEL_RUNS}`);
     console.log("- Secrets: not printed");
     if (blockers.length > 0) {

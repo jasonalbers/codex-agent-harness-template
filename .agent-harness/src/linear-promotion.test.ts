@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -96,4 +96,18 @@ test("formats blocked comments for failed runner startup", () => {
   assert.match(agentBlockedCommentBody({ command: "symphony run", exitCode: 1 }), /Agent runner exited before completing work/);
   assert.match(agentBlockedCommentBody({ command: "symphony run", exitCode: 1 }), /Command: `symphony run`/);
   assert.match(agentBlockedCommentBody({ command: "symphony run", exitCode: 1 }), /Exit code: `1`/);
+});
+
+test("generated Symphony workflow uses current Codex app-server policy values", () => {
+  const workflow = renderWorkflow({
+    LINEAR_PROJECT_SLUG: "example-project",
+    GITHUB_REPO: "owner/repo",
+    CODEX_MODEL: "gpt-5.5",
+    AGENT_MAX_PARALLEL_RUNS: "1",
+  });
+
+  assert.match(workflow, /approval_policy:\s+never/);
+  assert.doesNotMatch(workflow, /reject/);
+  assert.match(workflow, /thread_sandbox:\s+workspace-write/);
+  assert.match(workflow, /type:\s+workspaceWrite/);
 });
