@@ -557,8 +557,15 @@ function parentPublishBody(issue: AgentOrderIssue, project: Project, branch: str
   ].join("\n");
 }
 
+function existingPullRequestUrl(project: Project, branch: string, workspace: string): string | undefined {
+  const prView = runQuiet("gh", ["pr", "view", branch, "--repo", project.repo, "--json", "url", "--jq", ".url"], workspace);
+  if (prView.ok && prView.output.trim()) return prView.output.trim();
+  return undefined;
+}
+
 function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, workspaceRoot: string): ParentPublishResult {
   const workspace = workspaceForIssue(workspaceRoot, issue);
+  const branch = agentBranchName(issue);
   if (!existsSync(workspace)) {
     return { ok: false, message: `agent workspace does not exist: ${workspace}` };
   }
@@ -566,10 +573,13 @@ function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, worksp
     return { ok: false, message: `agent workspace is not a git repository: ${workspace}` };
   }
   if (!hasPublishableChanges(workspace)) {
+    const existingPrUrl = existingPullRequestUrl(project, branch, workspace);
+    if (existingPrUrl) {
+      return { ok: true, branch, prUrl: existingPrUrl, message: "found existing pull request for previously published workspace" };
+    }
     return { ok: true, skipped: true, message: "no publishable workspace changes found" };
   }
 
-  const branch = agentBranchName(issue);
   const checkout = runQuiet("git", ["checkout", "-B", branch], workspace);
   if (!checkout.ok) return { ok: false, branch, message: `failed to create publish branch ${branch}: ${checkout.output}` };
   const identity = ensureWorkspaceGitIdentity(workspace);
@@ -580,6 +590,10 @@ function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, worksp
   runQuiet("git", ["reset", "--", ".codex"], workspace);
 
   if (!hasPublishableChanges(workspace)) {
+    const existingPrUrl = existingPullRequestUrl(project, branch, workspace);
+    if (existingPrUrl) {
+      return { ok: true, branch, prUrl: existingPrUrl, message: "found existing pull request for previously published workspace" };
+    }
     return { ok: true, skipped: true, branch, message: "only ignored worker runtime files changed" };
   }
 
@@ -597,9 +611,9 @@ function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, worksp
     return { ok: true, branch, prUrl, message: "published workspace changes and opened pull request" };
   }
 
-  const prView = runQuiet("gh", ["pr", "view", branch, "--repo", project.repo, "--json", "url", "--jq", ".url"], workspace);
-  if (prView.ok && prView.output.trim()) {
-    return { ok: true, branch, prUrl: prView.output.trim(), message: "published workspace changes and found existing pull request" };
+  const existingPrUrl = existingPullRequestUrl(project, branch, workspace);
+  if (existingPrUrl) {
+    return { ok: true, branch, prUrl: existingPrUrl, message: "published workspace changes and found existing pull request" };
   }
   return { ok: false, branch, message: `failed to open pull request for ${branch}: ${prCreate.output}` };
 }
