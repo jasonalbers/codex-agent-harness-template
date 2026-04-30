@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, evaluateAutoMergeReadiness, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, requiredLinearStateId, runAutoMergeFinalize, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, agentServiceCommand, agentServiceUnitName, codexAuthStatus, evaluateAutoMergeReadiness, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderAgentServiceUnit, renderWorkflow, requiredLinearStateId, runAutoMergeFinalize, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, validateAgentServiceInstall, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -542,6 +542,85 @@ test("AGENT_AUTO_MERGE=false preserves Ready to Merge behavior", async () => {
 
   assert.equal(result.status, "disabled");
   assert.deepEqual(events, []);
+});
+
+test("sanitizes agent service unit names", () => {
+  assert.equal(agentServiceUnitName("operator-os"), "agent-harness-operator-os.service");
+  assert.equal(agentServiceUnitName("Operator OS!!"), "agent-harness-operator-os.service");
+  assert.equal(agentServiceUnitName("///"), "agent-harness-project.service");
+});
+
+test("renders repo-local agent systemd unit without secrets", () => {
+  const unit = renderAgentServiceUnit({
+    projectName: "operator-os",
+    repoRoot: "/srv/repos/operator-os",
+    restartSec: 45,
+  });
+
+  assert.match(unit, /\[Unit\]/);
+  assert.match(unit, /WorkingDirectory=\/srv\/repos\/operator-os/);
+  assert.match(unit, /Restart=always/);
+  assert.match(unit, /RestartSec=45/);
+  assert.match(unit, /AGENT_DRY_RUN=false/);
+  assert.match(unit, /SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1/);
+  assert.match(unit, /AGENT_SERVICE_MODE=1/);
+  assert.match(unit, /node \.agent-harness\/dist\/cli\.js agent start --project operator-os/);
+  assert.match(unit, /\.agent-harness\/\.runtime\/agent-harness-operator-os\.lock/);
+  assert.doesNotMatch(unit, /lin_api_/);
+  assert.doesNotMatch(unit, /OPENAI_API_KEY/);
+  assert.doesNotMatch(unit, /GITHUB_TOKEN/);
+});
+
+test("agent service command includes repo root, project name, and single-issue mode", () => {
+  const command = agentServiceCommand({
+    projectName: "operator-os",
+    repoRoot: "/srv/repos/operator-os",
+  });
+
+  assert.match(command, /\/srv\/repos\/operator-os/);
+  assert.match(command, /source \.agent-harness\/\.env/);
+  assert.match(command, /AGENT_DRY_RUN=false/);
+  assert.match(command, /SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1/);
+  assert.match(command, /AGENT_SERVICE_MODE=1/);
+  assert.match(command, /--project operator-os/);
+});
+
+test("agent service install refuses missing env or project config", () => {
+  const project = {
+    name: "operator-os",
+    repo: "owner/operator-os",
+    linear_project_slug: "operator-os",
+    default_branch: "main",
+    agent_enabled: true,
+  };
+
+  assert.deepEqual(validateAgentServiceInstall({
+    project,
+    hasProjectConfig: false,
+    envExists: true,
+    envValues: { LINEAR_API_KEY: "set", AGENT_WORKSPACE_ROOT: ".agent-workspaces" },
+    cliExists: true,
+  }), [".agent-harness/config/projects.json is required"]);
+
+  assert.deepEqual(validateAgentServiceInstall({
+    project,
+    hasProjectConfig: true,
+    envExists: false,
+    envValues: {},
+    cliExists: true,
+  }), [
+    ".agent-harness/.env is required",
+    "LINEAR_API_KEY is required in .agent-harness/.env",
+    "AGENT_WORKSPACE_ROOT is required in .agent-harness/.env",
+  ]);
+
+  assert.deepEqual(validateAgentServiceInstall({
+    project: { ...project, agent_enabled: false },
+    hasProjectConfig: true,
+    envExists: true,
+    envValues: { LINEAR_API_KEY: "set", AGENT_WORKSPACE_ROOT: ".agent-workspaces" },
+    cliExists: true,
+  }), ["project agent_enabled is false"]);
 });
 
 test("passes Symphony unattended guardrail acknowledgement flag", () => {

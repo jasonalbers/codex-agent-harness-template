@@ -80,6 +80,7 @@ issue is clear.
 - Symphony-style Codex execution policy.
 - GitHub PR and proof-of-work conventions.
 - Optional safe auto-merge and Linear `Done` finalization with `AGENT_AUTO_MERGE=true`.
+- Repo-local systemd user service support for continuous WSL/Linux work pickup.
 - Template sync for safely pulling future harness updates into derived repos.
 - Validation, safety, and public-template hygiene checks.
 
@@ -185,6 +186,27 @@ node .agent-harness/dist/cli.js template sync --apply
 ```
 
 The sync command applies only template-owned files and protects product-specific work.
+
+## Run As A User Service
+
+On Linux or WSL with user systemd, install a repo-local runner for one project:
+
+```bash
+node .agent-harness/dist/cli.js agent service install --project <name>
+node .agent-harness/dist/cli.js agent service start --project <name>
+node .agent-harness/dist/cli.js agent service status --project <name>
+node .agent-harness/dist/cli.js agent service logs --project <name>
+```
+
+The service polls that repo/project only. Mark a reviewed Linear issue
+`Ready for Agent`; the service will pick up one issue at a time until stopped.
+Pause it with:
+
+```bash
+node .agent-harness/dist/cli.js agent service stop --project <name>
+```
+
+See `.agent-harness/docs/runbooks/agent-service.md`.
 
 ## Project Setup
 

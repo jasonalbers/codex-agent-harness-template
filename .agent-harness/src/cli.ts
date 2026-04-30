@@ -30,6 +30,20 @@ type Project = {
   notes?: string;
 };
 
+type AgentServiceSpec = {
+  projectName: string;
+  repoRoot: string;
+  restartSec?: number;
+};
+
+type AgentServiceInstallValidation = {
+  project?: Project;
+  hasProjectConfig: boolean;
+  envExists: boolean;
+  envValues: Record<string, string>;
+  cliExists: boolean;
+};
+
 type IdeaPack = {
   path: string;
   raw: string;
@@ -160,6 +174,7 @@ const REQUIRED_FILES = [
   ".agent-harness/docs/templates/idea-passport.template.md",
   ".agent-harness/docs/templates/conversation-ledger.template.md",
   ".agent-harness/docs/templates/linear-issue-bundle.template.md",
+  ".agent-harness/docs/runbooks/agent-service.md",
   ".agent-harness/docs/runbooks/chatgpt-to-linear.md",
   ".agent-harness/docs/runbooks/template-sync.md",
   ".agent-harness/intake/README.md",
@@ -250,6 +265,8 @@ function usage(): string {
     "Agent/Symphony:",
     "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--in-progress-state \"In Progress\"] [--auto-merge] [--dry-run]",
     "  node .agent-harness/dist/cli.js agent publish --project <name> --issue <identifier> [--auto-merge] [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent service install --project <name> [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent service start|stop|restart|status|logs --project <name>",
     "  AGENT_AUTO_MERGE=true enables safe PR merge and Done finalization after publish.",
     "  node .agent-harness/dist/cli.js symphony bootstrap",
     "  node .agent-harness/dist/cli.js symphony preflight",
@@ -365,6 +382,10 @@ function printCheck(ok: boolean, message: string): void {
 function projectsPath(): string {
   const privatePath = join(HARNESS_ROOT, "config", "projects.json");
   return existsSync(privatePath) ? privatePath : join(HARNESS_ROOT, "config", "projects.example.json");
+}
+
+function hasPrivateProjectsConfig(): boolean {
+  return existsSync(join(HARNESS_ROOT, "config", "projects.json"));
 }
 
 function loadProjects(): ProjectConfig {
@@ -581,6 +602,112 @@ export function publishPreflight(repo: string, workspaceRoot: string, envValues:
 
 export function agentBranchName(issue: AgentOrderIssue): string {
   return `agent/${issue.identifier.toLowerCase()}-${slugify(issue.title).slice(0, 48)}`;
+}
+
+function systemdUserDir(): string {
+  return join(homedir(), ".config", "systemd", "user");
+}
+
+function serviceSlug(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "project";
+}
+
+export function agentServiceUnitName(projectName: string): string {
+  return `agent-harness-${serviceSlug(projectName)}.service`;
+}
+
+function agentServiceRuntimeDir(repoRoot: string): string {
+  return join(repoRoot, ".agent-harness", ".runtime");
+}
+
+function agentServiceLockPath(repoRoot: string, projectName: string): string {
+  return join(agentServiceRuntimeDir(repoRoot), `${agentServiceUnitName(projectName).replace(/\.service$/, "")}.lock`);
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function shellArg(value: string): string {
+  return /^[A-Za-z0-9._/-]+$/.test(value) ? value : shellQuote(value);
+}
+
+export function agentServiceCommand(spec: AgentServiceSpec): string {
+  const runtimeDir = agentServiceRuntimeDir(spec.repoRoot);
+  const lockPath = agentServiceLockPath(spec.repoRoot, spec.projectName);
+  const inner = [
+    "set -a",
+    "source .agent-harness/.env",
+    "set +a",
+    `AGENT_DRY_RUN=false SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1 AGENT_SERVICE_MODE=1 node .agent-harness/dist/cli.js agent start --project ${shellArg(spec.projectName)}`,
+  ].join("; ");
+  return [
+    `mkdir -p ${shellQuote(runtimeDir)}`,
+    `cd ${shellQuote(spec.repoRoot)}`,
+    `flock -n ${shellQuote(lockPath)} bash -lc ${shellQuote(inner)}`,
+  ].join(" && ");
+}
+
+export function renderAgentServiceUnit(spec: AgentServiceSpec): string {
+  const restartSec = spec.restartSec ?? 45;
+  return [
+    "[Unit]",
+    `Description=Agent harness runner for ${spec.projectName}`,
+    "After=network-online.target",
+    "Wants=network-online.target",
+    "",
+    "[Service]",
+    "Type=simple",
+    `WorkingDirectory=${spec.repoRoot}`,
+    "Environment=AGENT_DRY_RUN=false",
+    "Environment=SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1",
+    "Environment=AGENT_SERVICE_MODE=1",
+    `ExecStart=/usr/bin/env bash -lc ${shellQuote(agentServiceCommand(spec))}`,
+    "Restart=always",
+    `RestartSec=${restartSec}`,
+    "KillMode=control-group",
+    "",
+    "[Install]",
+    "WantedBy=default.target",
+    "",
+  ].join("\n");
+}
+
+export function validateAgentServiceInstall(input: AgentServiceInstallValidation): string[] {
+  const blockers: string[] = [];
+  if (!input.hasProjectConfig) blockers.push(".agent-harness/config/projects.json is required");
+  if (!input.project) blockers.push("project config entry was not found");
+  if (input.project && !input.project.agent_enabled) blockers.push("project agent_enabled is false");
+  if (input.project && isPlaceholder(input.project.repo)) blockers.push("project repo is missing or a placeholder");
+  if (input.project && isPlaceholder(input.project.linear_project_slug)) blockers.push("project Linear slug is missing or a placeholder");
+  if (!input.envExists) blockers.push(".agent-harness/.env is required");
+  for (const name of ["LINEAR_API_KEY", "AGENT_WORKSPACE_ROOT"]) {
+    if (!input.envValues[name]) blockers.push(`${name} is required in .agent-harness/.env`);
+  }
+  if (!input.cliExists) blockers.push(".agent-harness/dist/cli.js is required; run npm --prefix .agent-harness run build");
+  return blockers;
+}
+
+function agentServiceDetails(projectName: string, restartSec?: number): AgentServiceSpec & { unitName: string; unitPath: string; logCommand: string } {
+  const unitName = agentServiceUnitName(projectName);
+  return {
+    projectName,
+    repoRoot: PROJECT_ROOT,
+    restartSec,
+    unitName,
+    unitPath: join(systemdUserDir(), unitName),
+    logCommand: `journalctl --user -u ${unitName} -f -n 200`,
+  };
+}
+
+function printAgentServicePreview(details: ReturnType<typeof agentServiceDetails>): void {
+  console.log(`Unit name: ${details.unitName}`);
+  console.log(`Unit path: ${details.unitPath}`);
+  console.log(`WorkingDirectory: ${details.repoRoot}`);
+  console.log("Restart policy: Restart=always, RestartSec=45");
+  console.log(`Command: ${agentServiceCommand(details)}`);
+  console.log(`Logs: ${details.logCommand}`);
+  console.log("Secrets: not printed");
 }
 
 function workspaceForIssue(workspaceRoot: string, issue: AgentOrderIssue): string {
@@ -1628,7 +1755,7 @@ async function enforceAgentIssueOrder(apiKey: string, projectSlug: string, holdS
   const plan = planOrderedAgentRun(context.readyIssues);
   if (!plan.selected) {
     console.error(`No Ready for Agent issues found in project ${projectSlug}.`);
-    return { code: 1 };
+    return { code: 2 };
   }
   console.log(`Next Ready for Agent issue: ${plan.selected.identifier} ${plan.selected.title}`);
   const lifecycle = planAgentLifecycleUpdates(plan, context.stateIds, { holdStateName, inProgressStateName });
@@ -2166,6 +2293,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   }
   const dotenv = loadDotenv();
   const dryRun = Boolean(flags["dry-run"]) || boolValue(env("AGENT_DRY_RUN", dotenv), true);
+  const serviceMode = boolValue(env("AGENT_SERVICE_MODE", dotenv), false);
   const holdStateName = typeof flags["hold-state"] === "string" ? flags["hold-state"] : env("AGENT_READY_HOLD_STATE", dotenv) || "Todo";
   const inProgressStateName = typeof flags["in-progress-state"] === "string" ? flags["in-progress-state"] : env("AGENT_IN_PROGRESS_STATE", dotenv) || "In Progress";
   const project = projectByName(projectName);
@@ -2236,7 +2364,13 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   }
   const apiKey = env("LINEAR_API_KEY", dotenv);
   const claim = await enforceAgentIssueOrder(apiKey, project.linear_project_slug, holdStateName, inProgressStateName);
-  if (claim.code !== 0) return claim.code;
+  if (claim.code !== 0) {
+    if (serviceMode && claim.code === 2) {
+      console.log("No Ready for Agent issue found. Service run completed cleanly; systemd will poll again after RestartSec.");
+      return 0;
+    }
+    return claim.code;
+  }
   const runCode = symphonyRun(runEnv);
   if (claim.selected && claim.stateIds) {
     const publishResult = parentPublishWorkspace(project, claim.selected, runEnv.AGENT_WORKSPACE_ROOT);
@@ -2350,6 +2484,72 @@ async function agentPublish(flags: Record<string, string | boolean>): Promise<nu
   }
 }
 
+function runSystemctl(args: string[]): number {
+  return run("systemctl", ["--user", ...args]);
+}
+
+function agentServiceProject(flags: Record<string, string | boolean>): string {
+  return typeof flags.project === "string" ? flags.project : "";
+}
+
+async function agentService(action: string, flags: Record<string, string | boolean>): Promise<number> {
+  const serviceAction = action || "";
+  const projectName = agentServiceProject(flags);
+  if (!projectName) {
+    console.error("--project is required.");
+    return 1;
+  }
+  const details = agentServiceDetails(projectName);
+
+  if (serviceAction === "logs") {
+    return run("journalctl", ["--user", "-u", details.unitName, "-f", "-n", "200"]);
+  }
+  if (serviceAction === "status") {
+    return runSystemctl(["status", details.unitName, "--no-pager"]);
+  }
+  if (serviceAction === "start" || serviceAction === "stop" || serviceAction === "restart") {
+    return runSystemctl([serviceAction, details.unitName]);
+  }
+  if (serviceAction !== "install") {
+    console.error("agent service action must be install, start, stop, restart, status, or logs.");
+    return 1;
+  }
+  if (process.platform !== "linux") {
+    console.error("agent service install requires Linux or WSL with systemd user services.");
+    return 1;
+  }
+
+  const dotenv = loadDotenv();
+  const envPath = join(HARNESS_ROOT, ".env");
+  const project = projectByName(projectName);
+  const blockers = validateAgentServiceInstall({
+    project,
+    hasProjectConfig: hasPrivateProjectsConfig(),
+    envExists: existsSync(envPath),
+    envValues: dotenv,
+    cliExists: existsSync(join(HARNESS_ROOT, "dist", "cli.js")),
+  });
+  printAgentServicePreview(details);
+  if (blockers.length > 0) {
+    console.log("Install blockers:");
+    blockers.forEach((blocker) => console.log(`- ${blocker}`));
+    return 1;
+  }
+  if (Boolean(flags["dry-run"])) {
+    console.log("Dry run: no systemd unit was written.");
+    return 0;
+  }
+
+  mkdirSync(dirname(details.unitPath), { recursive: true });
+  writeFileSync(details.unitPath, renderAgentServiceUnit(details), "utf8");
+  const reload = runSystemctl(["daemon-reload"]);
+  if (reload !== 0) return reload;
+  console.log(`Installed ${details.unitName}`);
+  console.log(`Start: systemctl --user start ${details.unitName}`);
+  console.log(`Logs: ${details.logCommand}`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { group, action, positionals, flags } = parseArgs(process.argv.slice(2));
   if (group === "help" || group === "--help" || !group) {
@@ -2369,6 +2569,7 @@ async function main(): Promise<number> {
   if (group === "intake" && action === "promote") return intakePromote(positionals[0] || "", flags);
   if (group === "agent" && action === "start") return agentStart(flags);
   if (group === "agent" && action === "publish") return agentPublish(flags);
+  if (group === "agent" && action === "service") return agentService(positionals[0] || "", flags);
   if (group === "symphony" && action === "bootstrap") return symphonyBootstrap();
   if (group === "symphony" && action === "preflight") return symphonyPreflight();
   if (group === "symphony" && action === "run") return symphonyRun();
