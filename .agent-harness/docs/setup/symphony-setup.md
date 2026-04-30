@@ -26,6 +26,11 @@ Live runs are trusted local runner operations. The CLI passes Symphony's
 required unattended guardrail acknowledgement flag to the pinned upstream binary
 only after the local dry-run and readiness checks have completed.
 
+The generated workflow also sets `codex.approval_policy: never` explicitly.
+This prevents the pinned Symphony implementation from falling back to older
+object-form approval defaults that current Codex app-server builds no longer
+accept.
+
 ## Current Boundary
 
 The upstream reference implementation is Linear-first. If a future project must

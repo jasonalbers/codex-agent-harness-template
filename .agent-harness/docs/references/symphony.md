@@ -54,6 +54,7 @@ Ignored local state:
 - GitHub CLI auth from `gh auth token`
 - Codex auth at `~/.codex/auth.json` or `CODEX_AUTH_FILE`
 - `CODEX_MODEL`
+- `CODEX_APPROVAL_POLICY`
 - `AGENT_WORKSPACE_ROOT`
 - `AGENT_MAX_PARALLEL_RUNS`
 - `AGENT_DRY_RUN`
@@ -70,6 +71,11 @@ node .agent-harness/dist/cli.js agent start --project example-app --dry-run
 
 The bootstrap command pins upstream Symphony to the default `SYMPHONY_REF` in
 `.agent-harness/.env.example`. Update that ref only after rerunning the local readiness checks.
+
+The template explicitly sets `codex.approval_policy` to `never` in the generated
+workflow. Do not rely on the pinned Symphony default for this field; older
+Symphony builds defaulted to object-form `reject`, which is not accepted by
+current Codex app-server schemas.
 
 ## Known Boundary
 

@@ -24,6 +24,7 @@ agent:
   max_turns: 12
 codex:
   command: codex --config shell_environment_policy.inherit=all --config 'model="__CODEX_MODEL__"' --config model_reasoning_effort=high app-server
+  approval_policy: __CODEX_APPROVAL_POLICY__
   thread_sandbox: workspace-write
   turn_sandbox_policy:
     type: workspaceWrite
