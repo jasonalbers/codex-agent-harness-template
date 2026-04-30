@@ -126,6 +126,7 @@ test("generated Symphony workflow uses current Codex app-server policy values", 
   });
 
   assert.match(workflow, /approval_policy:\s+never/);
+  assert.match(workflow, /max_turns:\s+1/);
   assert.doesNotMatch(workflow, /reject/);
   assert.match(workflow, /thread_sandbox:\s+workspace-write/);
   assert.match(workflow, /type:\s+workspaceWrite/);
