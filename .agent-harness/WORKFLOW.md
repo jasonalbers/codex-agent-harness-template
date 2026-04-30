@@ -10,6 +10,8 @@ tracker:
     - Ready to Merge
   terminal_states:
     - Done
+    - Canceled
+    - Duplicate
 polling:
   interval_ms: 10000
 workspace:
@@ -69,7 +71,8 @@ operating model.
 Only work on issues in `Ready for Agent`, `In Progress`, `Changes Requested`,
 or `Ready to Merge`.
 
-Do not start work from `Backlog`, `Todo`, `Needs Human Review`, or `Blocked`.
+Do not start work from `Backlog`, `Todo`, `Blocked`, `Done`, `Canceled`, or
+`Duplicate`.
 
 ## Branch Naming
 
@@ -136,13 +139,18 @@ PR title format:
 
 Open a PR with verification evidence and proof of work.
 
+If verification passes and repository policy allows autopilot merge, merge the
+PR and record the merge result in the proof of work. If merge is not available
+to the runner, leave the PR ready and keep Linear at `Ready to Merge` with the
+reason recorded.
+
 ## Linear Updates
 
 Use this lifecycle:
 
 - `Ready for Agent` -> `In Progress`
-- `In Progress` -> `Needs Human Review`
 - `Changes Requested` -> `In Progress`
+- `In Progress` -> `Ready to Merge`
 - `Ready to Merge` -> `Done`
 
 If blocked, move to `Blocked` and explain the blocker.
@@ -155,5 +163,5 @@ Never:
 - Modify unrelated projects.
 - Start product work without a Linear issue.
 - Run destructive external actions without explicit approval.
-- Merge without required human review.
+- Merge without passing verification and recording proof of work.
 - Hide failed verification.

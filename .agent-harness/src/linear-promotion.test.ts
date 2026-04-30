@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -90,4 +90,10 @@ test("passes Symphony unattended guardrail acknowledgement flag", () => {
     "4007",
     "--i-understand-that-this-will-be-running-without-the-usual-guardrails",
   ]);
+});
+
+test("formats blocked comments for failed runner startup", () => {
+  assert.match(agentBlockedCommentBody({ command: "symphony run", exitCode: 1 }), /Agent runner exited before completing work/);
+  assert.match(agentBlockedCommentBody({ command: "symphony run", exitCode: 1 }), /Command: `symphony run`/);
+  assert.match(agentBlockedCommentBody({ command: "symphony run", exitCode: 1 }), /Exit code: `1`/);
 });

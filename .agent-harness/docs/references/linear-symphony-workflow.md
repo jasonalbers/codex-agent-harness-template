@@ -28,9 +28,10 @@ The base repository does not store real tokens. Project slugs are stored in
 
 - `Backlog`
 - `Todo`
-- `Needs Human Review`
 - `Blocked`
 - `Done`
+- `Canceled`
+- `Duplicate`
 
 Before running live Symphony work, confirm the Linear project uses these state
 names or update `.agent-harness/WORKFLOW.md` to match the real project.
@@ -57,4 +58,5 @@ that only edits a harmless docs file. Use it to prove:
 - Codex creates a GitHub PR.
 - Verification evidence appears in the PR.
 - Runtime files remain ignored.
-- The issue can move through the expected review and merge handoff.
+- The issue can move through the expected ready, in-progress, ready-to-merge,
+  done, and blocked/error states.

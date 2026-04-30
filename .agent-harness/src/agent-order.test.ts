@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { planOrderedAgentRun } from "./cli.js";
+import { planAgentLifecycleUpdates, planOrderedAgentRun } from "./cli.js";
 
 test("selects the lowest sequenced Ready for Agent issue and holds later ready issues", () => {
   const plan = planOrderedAgentRun([
@@ -39,4 +39,21 @@ test("falls back to identifier order for unsequenced Ready for Agent issues", ()
 
   assert.equal(plan.selected?.identifier, "JAS-5");
   assert.deepEqual(plan.holdIssues.map((issue) => issue.identifier), ["JAS-9"]);
+});
+
+test("claims the selected Ready for Agent issue as In Progress before runner start", () => {
+  const plan = planOrderedAgentRun([
+    { id: "issue-2", identifier: "JAS-2", title: "Second", state: { name: "Ready for Agent" }, description: "## Agent Execution Order\n\n- Sequence: 02/02" },
+    { id: "issue-1", identifier: "JAS-1", title: "First", state: { name: "Ready for Agent" }, description: "## Agent Execution Order\n\n- Sequence: 01/02" },
+  ]);
+  const updates = planAgentLifecycleUpdates(plan, new Map([
+    ["Todo", "todo-state"],
+    ["In Progress", "in-progress-state"],
+  ]), { holdStateName: "Todo", inProgressStateName: "In Progress" });
+
+  assert.deepEqual(updates.errors, []);
+  assert.deepEqual(updates.updates, [
+    { issue: plan.holdIssues[0], stateId: "todo-state", stateName: "Todo", reason: "hold-later-ready" },
+    { issue: plan.selected, stateId: "in-progress-state", stateName: "In Progress", reason: "claim-selected" },
+  ]);
 });

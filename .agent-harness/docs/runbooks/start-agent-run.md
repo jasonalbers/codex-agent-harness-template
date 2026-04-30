@@ -23,10 +23,18 @@ acknowledgement flag to the pinned upstream binary.
 
 If multiple promoted issues are set to `Ready for Agent`, `agent start` keeps
 the lowest `Agent Execution Order` issue ready and moves later ready issues back
-to `Todo` before starting the runner.
+to `Todo` before starting the runner. In live mode, it then claims the selected
+issue by moving it to `In Progress`.
 
 Use a different hold state when needed:
 
 ```bash
-AGENT_DRY_RUN=false node .agent-harness/dist/cli.js agent start --project example-app --hold-state "Needs Human Review"
+AGENT_DRY_RUN=false node .agent-harness/dist/cli.js agent start --project example-app --hold-state "Todo"
 ```
+
+Use `AGENT_IN_PROGRESS_STATE` or `--in-progress-state` only if the Linear
+workspace intentionally names the claim state differently. The template default
+is `In Progress`.
+
+If the runner exits before completing work, the CLI moves the claimed issue to
+`Blocked` and adds a comment with the failed command and exit code.

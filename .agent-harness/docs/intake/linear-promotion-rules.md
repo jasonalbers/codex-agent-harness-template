@@ -53,9 +53,8 @@ artifacts for deeper review.
 
 ## Status Rule
 
-Created Linear issues should begin outside active agent execution. Move them to
-`Ready for Agent` only after a human review confirms the issue is small, clear,
-and safe for an agent run.
+Created Linear issues should begin outside active agent execution. The human
+approval gate is moving a small, clear, safe issue to `Ready for Agent`.
 
 ## Promotion Verification
 

@@ -109,7 +109,7 @@ idea:example-idea
 
 ## 8. Start Agent Work
 
-Only after human review, move selected Linear issues to `Ready for Agent`.
+After review, move selected Linear issues to `Ready for Agent`.
 
 Then run:
 

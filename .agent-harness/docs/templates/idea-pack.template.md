@@ -85,7 +85,7 @@ attention.
 
 - [ ] Status states are documented.
 - [ ] Each state has a user-facing description.
-- [ ] Blocked and approval-needed states are included.
+- [ ] Blocked and error states are included.
 
 #### Out Of Scope
 

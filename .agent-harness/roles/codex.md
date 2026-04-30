@@ -30,6 +30,7 @@ Read these files before starting work:
 - Run the relevant verification command after editing.
 - Report blockers clearly.
 - Produce proof of work.
+- Move claimed Linear work through the configured autopilot states.
 - Keep product code outside `.agent-harness/` unless the task is explicitly about the harness.
 
 ## Proof Of Work
@@ -50,5 +51,5 @@ Every implementation run should report:
 - Never modify unrelated projects.
 - Never perform destructive actions without explicit approval.
 - Never hide failed tests or failed verification.
-- Never merge without required human review.
+- Never mark work done without passing verification and recording proof of work.
 - Never create broad product strategy unless explicitly asked.

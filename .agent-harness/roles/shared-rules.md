@@ -8,7 +8,7 @@ These rules apply to all AI tools working in this repository.
 - Do not modify unrelated files.
 - Do not invent external facts.
 - Mark assumptions clearly.
-- Preserve human approval gates.
+- Treat `Ready for Agent` as the human approval gate for Codex execution.
 - Do not perform destructive external actions without explicit approval.
 
 ## Work Quality

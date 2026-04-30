@@ -22,9 +22,9 @@
 
 ## Rollback Notes
 
-## Human Review Checklist
+## Completion Checklist
 
 - [ ] Acceptance criteria met.
-- [ ] Verification reviewed.
+- [ ] Verification passed.
 - [ ] No secrets committed.
 - [ ] Runtime artifacts excluded.

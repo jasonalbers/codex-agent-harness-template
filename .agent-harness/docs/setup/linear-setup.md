@@ -23,11 +23,12 @@ Backlog
 Todo
 Ready for Agent
 In Progress
-Needs Human Review
 Changes Requested
+Blocked
 Ready to Merge
 Done
-Blocked
+Canceled
+Duplicate
 ```
 
 See `.agent-harness/docs/linear/linear-status-model.md`.
