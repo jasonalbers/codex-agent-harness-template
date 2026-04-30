@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "tracker": {
+    "kind": "linear",
+    "project_slug_env": "LINEAR_PROJECT_SLUG"
+  },
+  "github": {
+    "repo_env": "GITHUB_REPO",
+    "branch_format": "agent/<linear-issue-id>-short-description",
+    "pr_title_format": "[<Linear issue id>] Short description"
+  },
+  "workspace": {
+    "root_env": "AGENT_WORKSPACE_ROOT",
+    "isolation": "per issue workspace"
+  },
+  "agent": {
+    "worker": "codex",
+    "mode": "app-server",
+    "model_env": "CODEX_MODEL"
+  },
+  "proof": {
+    "required": true,
+    "template": ".agent-harness/docs/templates/proof-of-work.template.md"
+  }
+}

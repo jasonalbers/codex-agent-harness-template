@@ -1,0 +1,11 @@
+Nixpacks Reference For LLMs
+===========================
+
+No Nixpacks deployment decision has been made for this repository.
+
+If Nixpacks is proposed later, add a concise local reference here with:
+- Why it is needed.
+- How it is configured.
+- How to run it locally.
+- How to roll it back.
+- What alternatives were considered.

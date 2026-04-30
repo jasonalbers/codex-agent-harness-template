@@ -1,0 +1,23 @@
+{
+  "name": "codex-agent-harness-template",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable Codex agent harness template for ChatGPT idea intake, Linear work queues, and Symphony-style GitHub execution.",
+  "type": "module",
+  "bin": {
+    "agent-harness": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "harness": "node dist/cli.js",
+    "validate": "node dist/cli.js validate repo",
+    "intake:demo": "node dist/cli.js intake validate .agent-harness/docs/templates/idea-pack.template.md && node dist/cli.js intake compile .agent-harness/docs/templates/idea-pack.template.md --out .agent-harness/intake/compiled/template-demo && node dist/cli.js intake promote .agent-harness/intake/compiled/template-demo --dry-run"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

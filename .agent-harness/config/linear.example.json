@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "workspace_model": "one Linear workspace, one Linear project per GitHub repository",
+  "statuses": [
+    "Backlog",
+    "Todo",
+    "Ready for Agent",
+    "In Progress",
+    "Needs Human Review",
+    "Changes Requested",
+    "Ready to Merge",
+    "Done",
+    "Blocked"
+  ],
+  "active_statuses": [
+    "Ready for Agent",
+    "In Progress",
+    "Changes Requested",
+    "Ready to Merge"
+  ],
+  "terminal_statuses": [
+    "Done",
+    "Closed",
+    "Cancelled",
+    "Canceled",
+    "Duplicate",
+    "Blocked"
+  ],
+  "labels": [
+    "agent",
+    "codex",
+    "setup",
+    "bug",
+    "feature",
+    "docs",
+    "infra",
+    "quality",
+    "security",
+    "linear",
+    "github",
+    "symphony"
+  ]
+}

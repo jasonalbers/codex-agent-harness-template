@@ -1,0 +1,32 @@
+name: validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: .agent-harness/package-lock.json
+      - name: Install harness dependencies
+        run: npm --prefix .agent-harness ci
+      - name: Build harness CLI
+        run: npm --prefix .agent-harness run build
+      - name: Validate environment defaults
+        run: node .agent-harness/dist/cli.js validate env --dry-run
+      - name: Validate repository structure
+        run: node .agent-harness/dist/cli.js validate repo
+      - name: Validate intake workflow
+        run: |
+          node .agent-harness/dist/cli.js intake validate .agent-harness/docs/templates/idea-pack.template.md
+          node .agent-harness/dist/cli.js intake compile .agent-harness/docs/templates/idea-pack.template.md --out .agent-harness/intake/compiled/template-demo
+          node .agent-harness/dist/cli.js intake promote .agent-harness/intake/compiled/template-demo --dry-run

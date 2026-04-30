@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "default_agent": "codex",
+  "models": {
+    "default": "gpt-5.5",
+    "simple": "gpt-5.4-mini",
+    "standard": "gpt-5.4",
+    "complex": "gpt-5.5"
+  },
+  "reasoning": {
+    "default": "high",
+    "complex": "xhigh"
+  },
+  "max_parallel_runs": 2,
+  "dry_run_default": true,
+  "proof_template": ".agent-harness/docs/templates/proof-of-work.template.md"
+}

@@ -1,0 +1,159 @@
+---
+tracker:
+  kind: linear
+  api_key: $LINEAR_API_KEY
+  project_slug: "__LINEAR_PROJECT_SLUG__"
+  active_states:
+    - Ready for Agent
+    - In Progress
+    - Changes Requested
+    - Ready to Merge
+  terminal_states:
+    - Done
+polling:
+  interval_ms: 10000
+workspace:
+  root: $AGENT_WORKSPACE_ROOT
+hooks:
+  after_create: |
+    git clone --depth 1 "git@github.com:__GITHUB_REPO__.git" .
+agent:
+  max_concurrent_agents: __AGENT_MAX_PARALLEL_RUNS__
+  max_turns: 12
+codex:
+  command: codex --config shell_environment_policy.inherit=all --config 'model="__CODEX_MODEL__"' --config model_reasoning_effort=high app-server
+  thread_sandbox: workspace-write
+  turn_sandbox_policy:
+    type: workspaceWrite
+server:
+  port: 4007
+---
+
+# Workflow
+
+You are working on a Linear issue for a configured GitHub repository.
+
+Issue context:
+
+- Identifier: `{{ issue.identifier }}`
+- Title: `{{ issue.title }}`
+- Current status: `{{ issue.state }}`
+- Labels: `{{ issue.labels }}`
+- URL: `{{ issue.url }}`
+
+Description:
+
+{% if issue.description %}
+{{ issue.description }}
+{% else %}
+No description provided.
+{% endif %}
+
+## Operating Model
+
+Humans steer. Agents execute.
+
+Linear supplies the work. GitHub stores the code. The base repo stores the
+operating model.
+
+## Required Reading
+
+1. `AGENTS.md`
+2. `.agent-harness/WORKFLOW.md`
+3. `.agent-harness/ARCHITECTURE.md`
+4. Target repository instructions.
+5. The Linear issue acceptance criteria.
+
+## Linear Issue Selection
+
+Only work on issues in `Ready for Agent`, `In Progress`, `Changes Requested`,
+or `Ready to Merge`.
+
+Do not start work from `Backlog`, `Todo`, `Needs Human Review`, or `Blocked`.
+
+## Branch Naming
+
+Use:
+
+```text
+agent/<linear-issue-id>-short-description
+```
+
+## Plan Before Editing
+
+Before editing code:
+
+1. Inspect the target repo.
+2. Confirm the issue scope.
+3. Create or update an execution plan when the work is non-trivial.
+4. Identify the verification command.
+
+## Implementation
+
+Keep changes small and directly tied to the Linear issue.
+
+Do not perform product work in the base repo unless the issue is explicitly
+about the base harness.
+
+## Verification
+
+Run the issue or plan verification command. If verification cannot run, record
+the exact blocker.
+
+## Trust And Safety
+
+This public template uses Symphony and Codex safer defaults unless a target
+project explicitly documents a higher-trust local policy.
+
+Do not relax approvals, sandboxing, or external write permissions unless the
+project runbook explains why that is acceptable.
+
+## Proof Of Work
+
+Every run must produce proof of work using the structure in
+`.agent-harness/docs/templates/proof-of-work.template.md`.
+
+Include:
+
+- Linear issue.
+- GitHub repo.
+- Branch.
+- PR link.
+- Summary.
+- Files changed.
+- Commands run.
+- Test results.
+- Risks.
+- Rollback notes.
+
+## Pull Requests
+
+PR title format:
+
+```text
+[Linear issue id] Short description
+```
+
+Open a PR with verification evidence and proof of work.
+
+## Linear Updates
+
+Use this lifecycle:
+
+- `Ready for Agent` -> `In Progress`
+- `In Progress` -> `Needs Human Review`
+- `Changes Requested` -> `In Progress`
+- `Ready to Merge` -> `Done`
+
+If blocked, move to `Blocked` and explain the blocker.
+
+## Never Do
+
+Never:
+
+- Commit secrets.
+- Modify unrelated projects.
+- Start product work without a Linear issue.
+- Run destructive external actions without explicit approval.
+- Merge without required human review.
+- Hide failed verification.

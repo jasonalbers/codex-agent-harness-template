@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "projects": [
+    {
+      "name": "example-app",
+      "repo": "example-org/example-app",
+      "linear_project_slug": "example-app-abc123",
+      "default_branch": "main",
+      "agent_enabled": false,
+      "validation_command": "node .agent-harness/dist/cli.js validate repo",
+      "notes": "Replace with a real GitHub repository and Linear project slug before enabling agents."
+    },
+    {
+      "name": "second-example",
+      "repo": "example-org/second-example",
+      "linear_project_slug": "PLACEHOLDER",
+      "default_branch": "main",
+      "agent_enabled": false,
+      "validation_command": "node .agent-harness/dist/cli.js validate repo",
+      "notes": "Placeholder showing how additional projects are added."
+    }
+  ]
+}

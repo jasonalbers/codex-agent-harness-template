@@ -1,0 +1,11 @@
+uv Reference For LLMs
+=====================
+
+This repository intentionally uses a TypeScript harness CLI.
+
+If a future product chooses uv, keep that decision in the product repo and add a
+concise local reference there with:
+- Required commands.
+- Lockfile expectations.
+- CI behavior.
+- How agents should install and verify dependencies.

@@ -1,0 +1,11 @@
+Design System Reference For LLMs
+================================
+
+This base repo does not define a product UI design system.
+
+Use this reference for agent-facing documentation quality:
+- Keep instructions short and direct.
+- Prefer checklists for operating procedures.
+- Prefer examples for templates.
+- Make state and risk explicit.
+- Avoid product-specific UI language in the base harness.
