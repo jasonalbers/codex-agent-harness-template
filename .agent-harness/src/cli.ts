@@ -409,6 +409,28 @@ function runQuiet(command: string, args: string[], cwd = PROJECT_ROOT, extraEnv:
   };
 }
 
+function gitConfigValue(name: string, cwd = PROJECT_ROOT): string {
+  const result = runQuiet("git", ["config", "--get", name], cwd);
+  return result.ok ? result.output.trim() : "";
+}
+
+function ensureWorkspaceGitIdentity(workspace: string): { ok: boolean; message?: string } {
+  const existingName = gitConfigValue("user.name", workspace);
+  const existingEmail = gitConfigValue("user.email", workspace);
+  if (existingName && existingEmail) return { ok: true };
+
+  const sourceName = gitConfigValue("user.name");
+  const sourceEmail = gitConfigValue("user.email");
+  if (!sourceName || !sourceEmail) {
+    return { ok: false, message: "git user.name and user.email are required in the source repo or global git config" };
+  }
+  const setName = runQuiet("git", ["config", "user.name", sourceName], workspace);
+  if (!setName.ok) return { ok: false, message: `failed to set workspace git user.name: ${setName.output}` };
+  const setEmail = runQuiet("git", ["config", "user.email", sourceEmail], workspace);
+  if (!setEmail.ok) return { ok: false, message: `failed to set workspace git user.email: ${setEmail.output}` };
+  return { ok: true };
+}
+
 export function publishPreflight(repo: string, workspaceRoot: string, envValues: Record<string, string> = {}): PublishPreflightResult {
   const checked: string[] = [];
   const blockers: string[] = [];
@@ -431,6 +453,12 @@ export function publishPreflight(repo: string, workspaceRoot: string, envValues:
   const gitVersion = runQuiet("git", ["--version"], PROJECT_ROOT, envValues);
   if (!gitVersion.ok) blockers.push("git is not available to the local runner environment");
   else checked.push("git is available");
+
+  if (!gitConfigValue("user.name") || !gitConfigValue("user.email")) {
+    blockers.push("git author identity is not configured in the local runner environment");
+  } else {
+    checked.push("git author identity is configured");
+  }
 
   const ghStatus = runQuiet("gh", ["auth", "status", "--hostname", "github.com"], PROJECT_ROOT, envValues);
   if (!ghStatus.ok) blockers.push("GitHub CLI auth is not available to the local runner environment");
@@ -535,6 +563,8 @@ function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, worksp
   const branch = agentBranchName(issue);
   const checkout = runQuiet("git", ["checkout", "-B", branch], workspace);
   if (!checkout.ok) return { ok: false, branch, message: `failed to create publish branch ${branch}: ${checkout.output}` };
+  const identity = ensureWorkspaceGitIdentity(workspace);
+  if (!identity.ok) return { ok: false, branch, message: identity.message || "failed to configure workspace git identity" };
 
   const add = runQuiet("git", ["add", "-A", "--", "."], workspace);
   if (!add.ok) return { ok: false, branch, message: `failed to stage workspace changes: ${add.output}` };
