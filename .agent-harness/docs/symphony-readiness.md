@@ -31,6 +31,8 @@ A project is live-ready when:
 - Generated workflow uses current Codex app-server policy values:
   `approval_policy: never`, `thread_sandbox: workspace-write`, and
   `turn_sandbox_policy.type: workspaceWrite`.
+- Bootstrapped Symphony has the harness compatibility patch for unattended
+  `mcpServer/elicitation/request` events.
 - `AGENT_WORKSPACE_ROOT` points outside the source checkout.
 - The target repo has a validation command agents can run.
 - One setup issue has completed with a PR and proof of work.

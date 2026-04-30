@@ -77,6 +77,12 @@ workflow. Do not rely on the pinned Symphony default for this field; older
 Symphony builds defaulted to object-form `reject`, which is not accepted by
 current Codex app-server schemas.
 
+The CLI applies a local compatibility patch to the pinned Symphony source during
+`symphony bootstrap` and before `symphony run`. The patch handles current Codex
+`mcpServer/elicitation/request` messages by returning a valid declined response
+for unattended runs. Without that response, Codex can wait for operator input and
+the Symphony process can remain alive without completing the issue.
+
 ## Known Boundary
 
 Upstream Symphony currently targets Linear. If a future project should run
