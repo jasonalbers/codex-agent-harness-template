@@ -79,6 +79,7 @@ issue is clear.
 - Linear issue ordering for agent pickup.
 - Symphony-style Codex execution policy.
 - GitHub PR and proof-of-work conventions.
+- Optional safe auto-merge and Linear `Done` finalization with `AGENT_AUTO_MERGE=true`.
 - Template sync for safely pulling future harness updates into derived repos.
 - Validation, safety, and public-template hygiene checks.
 

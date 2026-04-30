@@ -144,7 +144,10 @@ The parent CLI uses this PR title format:
 
 When implementation and verification are complete, leave the workspace changes
 in place and stop. The parent CLI will publish the workspace from the verified
-host environment and move Linear to `Ready to Merge`.
+host environment and move Linear to `Ready to Merge`. If `AGENT_AUTO_MERGE=true`
+is configured, the parent CLI may then merge the clean PR and move Linear to
+`Done` after GitHub confirms the PR is open, not draft, mergeable, clean,
+successfully checked, and not blocked by review.
 
 ## Linear Updates
 
@@ -153,7 +156,7 @@ The parent CLI owns this lifecycle:
 - `Ready for Agent` -> `In Progress`
 - `Changes Requested` -> `In Progress`
 - `In Progress` -> `Ready to Merge`
-- `Ready to Merge` -> `Done`
+- `Ready to Merge` -> `Done` when safe auto-merge is enabled and succeeds
 
 If blocked, move to `Blocked` and explain the blocker.
 

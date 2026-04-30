@@ -248,8 +248,9 @@ function usage(): string {
     "  node .agent-harness/dist/cli.js linear sync [--dry-run] [--project-slug <slug>]",
     "",
     "Agent/Symphony:",
-    "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--in-progress-state \"In Progress\"] [--dry-run]",
-    "  node .agent-harness/dist/cli.js agent publish --project <name> --issue <identifier> [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--in-progress-state \"In Progress\"] [--auto-merge] [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent publish --project <name> --issue <identifier> [--auto-merge] [--dry-run]",
+    "  AGENT_AUTO_MERGE=true enables safe PR merge and Done finalization after publish.",
     "  node .agent-harness/dist/cli.js symphony bootstrap",
     "  node .agent-harness/dist/cli.js symphony preflight",
     "  node .agent-harness/dist/cli.js symphony run",
@@ -407,6 +408,48 @@ type ParentPublishResult = {
   branch?: string;
   prUrl?: string;
   message: string;
+};
+
+type AutoMergeMethod = "merge" | "squash" | "rebase";
+
+export type AutoMergePullRequest = {
+  url?: string;
+  state?: string;
+  isDraft?: boolean;
+  mergeable?: string | null;
+  mergeStateStatus?: string | null;
+  reviewDecision?: string | null;
+  statusCheckRollup?: Array<Record<string, any>>;
+};
+
+export type AutoMergeReadiness = {
+  action: "merge" | "wait" | "blocked";
+  reason: string;
+};
+
+type AutoMergeFinalizeInput = {
+  enabled: boolean;
+  mergeMethod: AutoMergeMethod;
+  pollIntervalMs: number;
+  timeoutMs: number;
+  issue: AgentOrderIssue;
+  prUrl?: string;
+};
+
+type AutoMergeFinalizeDeps = {
+  fetchPullRequest: () => Promise<AutoMergePullRequest>;
+  mergePullRequest: (method: AutoMergeMethod) => Promise<{ sha?: string; url?: string }>;
+  markDone: (body: string) => Promise<void>;
+  addComment: (body: string) => Promise<void>;
+  markBlocked: (body: string) => Promise<void>;
+  sleep?: (ms: number) => Promise<void>;
+  now?: () => number;
+};
+
+export type AutoMergeFinalizeResult = {
+  status: "disabled" | "merged" | "waiting" | "not_ready" | "failed";
+  message: string;
+  sha?: string;
 };
 
 function repoCloneUrl(repo: string): string {
@@ -634,6 +677,152 @@ function parentPublishWorkspace(project: Project, issue: AgentOrderIssue, worksp
     return { ok: true, branch, prUrl: existingPrUrl, message: "published workspace changes and found existing pull request" };
   }
   return { ok: false, branch, message: `failed to open pull request for ${branch}: ${prCreate.output}` };
+}
+
+function upper(value: unknown): string {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function checkName(check: Record<string, any>): string {
+  return String(check.name || check.context || check.workflowName || check.__typename || "unknown check");
+}
+
+function checkOutcome(check: Record<string, any>): "success" | "pending" | "failed" {
+  const conclusion = upper(check.conclusion);
+  const state = upper(check.state);
+  const status = upper(check.status);
+  if (["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"].includes(conclusion) || ["FAILURE", "ERROR"].includes(state)) return "failed";
+  if (["SUCCESS", "SKIPPED", "NEUTRAL"].includes(conclusion) || state === "SUCCESS") return "success";
+  if (["PENDING", "EXPECTED"].includes(state) || ["QUEUED", "IN_PROGRESS", "PENDING", "REQUESTED", "WAITING"].includes(status)) return "pending";
+  if (status === "COMPLETED") return conclusion ? "failed" : "pending";
+  return "pending";
+}
+
+export function evaluateAutoMergeReadiness(pr: AutoMergePullRequest): AutoMergeReadiness {
+  if (!pr.url) return { action: "blocked", reason: "pull request URL is missing" };
+  if (upper(pr.state) !== "OPEN") return { action: "blocked", reason: `pull request is not open: ${pr.state || "missing"}` };
+  if (pr.isDraft) return { action: "wait", reason: "pull request is still a draft" };
+
+  const mergeable = upper(pr.mergeable);
+  if (!mergeable) return { action: "wait", reason: "GitHub did not report PR mergeability yet" };
+  if (mergeable && mergeable !== "MERGEABLE") {
+    if (mergeable === "UNKNOWN") return { action: "wait", reason: "GitHub has not resolved PR mergeability yet" };
+    return { action: "blocked", reason: `pull request mergeable state is ${mergeable}` };
+  }
+
+  const mergeState = upper(pr.mergeStateStatus);
+  if (!mergeState) return { action: "wait", reason: "GitHub did not report PR merge state yet" };
+  if (mergeState && !["CLEAN", "HAS_HOOKS"].includes(mergeState)) {
+    if (["UNKNOWN", "BLOCKED", "BEHIND", "UNSTABLE"].includes(mergeState)) return { action: "wait", reason: `pull request merge state is ${mergeState}` };
+    return { action: "blocked", reason: `pull request merge state is ${mergeState}` };
+  }
+
+  const reviewDecision = upper(pr.reviewDecision);
+  if (reviewDecision === "CHANGES_REQUESTED") return { action: "blocked", reason: "review changes are requested" };
+  if (reviewDecision === "REVIEW_REQUIRED") return { action: "wait", reason: "review is still required" };
+
+  const checks = pr.statusCheckRollup ?? [];
+  const failedChecks = checks.filter((check) => checkOutcome(check) === "failed").map(checkName);
+  if (failedChecks.length > 0) return { action: "blocked", reason: `checks failed: ${failedChecks.join(", ")}` };
+  const pendingChecks = checks.filter((check) => checkOutcome(check) === "pending").map(checkName);
+  if (pendingChecks.length > 0) return { action: "wait", reason: `checks are still pending: ${pendingChecks.join(", ")}` };
+
+  return { action: "merge", reason: "pull request is open, clean, checked, and mergeable" };
+}
+
+function autoMergePendingCommentBody(prUrl: string | undefined, reason: string): string {
+  return [
+    "Parent CLI auto-merge is enabled, but the pull request is not ready to merge yet.",
+    "",
+    `Pull request: ${prUrl || "not available"}`,
+    `Reason: ${reason}`,
+    "",
+    "The issue remains `Ready to Merge` so the parent CLI or a human can retry after the blocker clears.",
+  ].join("\n");
+}
+
+function autoMergeBlockedCommentBody(prUrl: string | undefined, reason: string): string {
+  return [
+    "Parent CLI auto-merge is enabled, but the pull request did not satisfy the safe merge gates.",
+    "",
+    `Pull request: ${prUrl || "not available"}`,
+    `Reason: ${reason}`,
+    "",
+    "The issue remains `Ready to Merge` so a human can inspect the PR and retry when it is safe.",
+  ].join("\n");
+}
+
+function autoMergeFailureCommentBody(prUrl: string | undefined, error: unknown): string {
+  return [
+    "Parent CLI auto-merge failed after the pull request passed the safe merge gates.",
+    "",
+    `Pull request: ${prUrl || "not available"}`,
+    "",
+    "Error:",
+    "",
+    "```text",
+    errorMessage(error),
+    "```",
+  ].join("\n");
+}
+
+function autoMergeDoneCommentBody(prUrl: string | undefined, merge: { sha?: string; url?: string }): string {
+  return [
+    "Parent CLI auto-merge completed.",
+    "",
+    `Pull request: ${merge.url || prUrl || "not available"}`,
+    `Merge SHA: \`${merge.sha || "not available"}\``,
+    "",
+    "The issue was moved to `Done` after the PR merged successfully.",
+  ].join("\n");
+}
+
+export async function runAutoMergeFinalize(input: AutoMergeFinalizeInput, deps: AutoMergeFinalizeDeps): Promise<AutoMergeFinalizeResult> {
+  if (!input.enabled) return { status: "disabled", message: "auto-merge disabled" };
+  const sleepFn = deps.sleep ?? sleep;
+  const nowFn = deps.now ?? (() => Date.now());
+  const startedAt = nowFn();
+
+  if (!input.prUrl) {
+    const message = "auto-merge skipped because no pull request URL was available";
+    await deps.addComment(autoMergeBlockedCommentBody(input.prUrl, message));
+    return { status: "not_ready", message };
+  }
+
+  while (true) {
+    let pr: AutoMergePullRequest;
+    try {
+      pr = await deps.fetchPullRequest();
+    } catch (error) {
+      const message = `failed to inspect pull request before auto-merge: ${errorMessage(error)}`;
+      await deps.addComment(autoMergePendingCommentBody(input.prUrl, message));
+      return { status: "waiting", message };
+    }
+    const readiness = evaluateAutoMergeReadiness({ ...pr, url: pr.url || input.prUrl });
+    if (readiness.action === "merge") {
+      try {
+        const merge = await deps.mergePullRequest(input.mergeMethod);
+        await deps.markDone(autoMergeDoneCommentBody(input.prUrl, merge));
+        return { status: "merged", message: "pull request merged and issue moved to Done", sha: merge.sha };
+      } catch (error) {
+        await deps.markBlocked(autoMergeFailureCommentBody(input.prUrl, error));
+        return { status: "failed", message: errorMessage(error) };
+      }
+    }
+
+    if (readiness.action === "wait" && nowFn() - startedAt < input.timeoutMs) {
+      await sleepFn(input.pollIntervalMs);
+      continue;
+    }
+
+    if (readiness.action === "wait") {
+      await deps.addComment(autoMergePendingCommentBody(input.prUrl, readiness.reason));
+      return { status: "waiting", message: readiness.reason };
+    }
+
+    await deps.addComment(autoMergeBlockedCommentBody(input.prUrl, readiness.reason));
+    return { status: "not_ready", message: readiness.reason };
+  }
 }
 
 function validateEnv(flags: Record<string, string | boolean>): number {
@@ -1333,6 +1522,12 @@ async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, sta
   await addLinearIssueComment(apiKey, issue, body);
 }
 
+async function markIssueDone(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
+  const doneStateId = requiredLinearStateId(stateIds, "Done");
+  await updateLinearIssueState(apiKey, issue, doneStateId, "Done", { settleMs: 2500, settleAttempts: 4 });
+  await addLinearIssueComment(apiKey, issue, body);
+}
+
 async function markIssueBlocked(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
   try {
     const blockedStateId = requiredLinearStateId(stateIds, "Blocked");
@@ -1362,6 +1557,66 @@ async function markIssueBlockedAfterStateTransitionFailure(apiKey: string, issue
       console.error(`Failed to add Linear blocker comment to ${issue.identifier}: ${commentMessage}`);
     }
   }
+}
+
+function autoMergeMethod(value: string): AutoMergeMethod {
+  const normalized = value.toLowerCase();
+  if (normalized === "merge" || normalized === "rebase" || normalized === "squash") return normalized;
+  return "squash";
+}
+
+function positiveInteger(value: string, fallback: number): number {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function autoMergeInput(flags: Record<string, string | boolean>, dotenv: Record<string, string>, issue: AgentOrderIssue, prUrl?: string): AutoMergeFinalizeInput {
+  const enabled = Boolean(flags["auto-merge"]) || boolValue(env("AGENT_AUTO_MERGE", dotenv), false);
+  const methodValue = typeof flags["merge-method"] === "string" ? flags["merge-method"] : env("AGENT_AUTO_MERGE_METHOD", dotenv);
+  const timeoutValue = typeof flags["auto-merge-timeout-ms"] === "string" ? flags["auto-merge-timeout-ms"] : env("AGENT_AUTO_MERGE_TIMEOUT_MS", dotenv);
+  const intervalValue = typeof flags["auto-merge-poll-ms"] === "string" ? flags["auto-merge-poll-ms"] : env("AGENT_AUTO_MERGE_POLL_MS", dotenv);
+  return {
+    enabled,
+    mergeMethod: autoMergeMethod(methodValue || "squash"),
+    pollIntervalMs: positiveInteger(intervalValue || "", 5000),
+    timeoutMs: positiveInteger(timeoutValue || "", 300000),
+    issue,
+    prUrl,
+  };
+}
+
+function fetchPullRequestForAutoMerge(project: Project, prUrl: string, cwd: string): AutoMergePullRequest {
+  const result = runQuiet("gh", ["pr", "view", prUrl, "--repo", project.repo, "--json", "url,state,isDraft,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup"], cwd);
+  if (!result.ok) throw new Error(`failed to inspect pull request before auto-merge: ${result.output}`);
+  return JSON.parse(result.output) as AutoMergePullRequest;
+}
+
+function mergePullRequestForAutoMerge(project: Project, prUrl: string, method: AutoMergeMethod, cwd: string): { sha?: string; url?: string } {
+  const methodFlag = method === "merge" ? "--merge" : method === "rebase" ? "--rebase" : "--squash";
+  const merge = runQuiet("gh", ["pr", "merge", prUrl, "--repo", project.repo, methodFlag, "--delete-branch"], cwd);
+  if (!merge.ok) throw new Error(`failed to merge pull request: ${merge.output}`);
+  const view = runQuiet("gh", ["pr", "view", prUrl, "--repo", project.repo, "--json", "url,mergeCommit"], cwd);
+  if (!view.ok) return { url: prUrl };
+  const parsed = JSON.parse(view.output) as { url?: string; mergeCommit?: { oid?: string } | null };
+  return { url: parsed.url || prUrl, sha: parsed.mergeCommit?.oid };
+}
+
+async function maybeAutoMergePublishedPullRequest(
+  apiKey: string,
+  project: Project,
+  issue: AgentOrderIssue,
+  stateIds: Map<string, string>,
+  workspaceRoot: string,
+  input: AutoMergeFinalizeInput,
+): Promise<AutoMergeFinalizeResult> {
+  const workspace = workspaceForIssue(workspaceRoot, issue);
+  return runAutoMergeFinalize(input, {
+    fetchPullRequest: async () => fetchPullRequestForAutoMerge(project, input.prUrl || "", workspace),
+    mergePullRequest: async (method) => mergePullRequestForAutoMerge(project, input.prUrl || "", method, workspace),
+    markDone: async (body) => markIssueDone(apiKey, issue, stateIds, body),
+    addComment: async (body) => addLinearIssueComment(apiKey, issue, body),
+    markBlocked: async (body) => markIssueBlocked(apiKey, issue, stateIds, body),
+  });
 }
 
 async function enforceAgentIssueOrder(apiKey: string, projectSlug: string, holdStateName: string, inProgressStateName: string): Promise<AgentClaimResult> {
@@ -1952,6 +2207,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   console.log(`Agent enabled: ${project.agent_enabled}`);
   console.log(`Ready ordering hold state: ${holdStateName}`);
   console.log(`Claim state: ${inProgressStateName}`);
+  console.log(`Auto-merge: ${boolValue(env("AGENT_AUTO_MERGE", dotenv), false) ? "enabled" : "disabled"}`);
   if (dryRun) {
     console.log("Dry run: no Symphony or Codex process started.");
     console.log("Resolved live runner inputs:");
@@ -1962,6 +2218,7 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     console.log(`- CODEX_APPROVAL_POLICY: ${runEnv.CODEX_APPROVAL_POLICY}`);
     console.log(`- AGENT_MAX_PARALLEL_RUNS: ${runEnv.AGENT_MAX_PARALLEL_RUNS}`);
     console.log(`- SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE: ${runEnv.SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE}`);
+    console.log(`- AGENT_AUTO_MERGE: ${env("AGENT_AUTO_MERGE", dotenv) || "false"}`);
     console.log(`- Publish preflight: ${publishCheck.ok ? "passed" : "failed"}`);
     publishCheck.checked.forEach((check) => console.log(`  - ${check}`));
     console.log("- Secrets: not printed");
@@ -1986,6 +2243,15 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
     if (publishResult.ok && !publishResult.skipped) {
       try {
         await markIssueReadyToMerge(apiKey, claim.selected, claim.stateIds, parentPublishCommentBody(publishResult));
+        const autoMergeResult = await maybeAutoMergePublishedPullRequest(
+          apiKey,
+          project,
+          claim.selected,
+          claim.stateIds,
+          runEnv.AGENT_WORKSPACE_ROOT,
+          autoMergeInput(flags, dotenv, claim.selected, publishResult.prUrl),
+        );
+        if (autoMergeResult.status === "failed") return 1;
         return 0;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -2066,6 +2332,15 @@ async function agentPublish(flags: Record<string, string | boolean>): Promise<nu
   if (publishResult.prUrl) console.log(`Pull request: ${publishResult.prUrl}`);
   try {
     await markIssueReadyToMerge(apiKey, issueResult.issue, issueResult.stateIds, parentPublishCommentBody(publishResult));
+    const autoMergeResult = await maybeAutoMergePublishedPullRequest(
+      apiKey,
+      project,
+      issueResult.issue,
+      issueResult.stateIds,
+      workspaceRoot,
+      autoMergeInput(flags, dotenv, issueResult.issue, publishResult.prUrl),
+    );
+    if (autoMergeResult.status === "failed") return 1;
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

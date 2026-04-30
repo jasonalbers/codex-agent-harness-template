@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, requiredLinearStateId, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, evaluateAutoMergeReadiness, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderWorkflow, requiredLinearStateId, runAutoMergeFinalize, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -332,6 +332,216 @@ test("post-publish state transition reports repeated Linear fetch failures witho
   );
 
   assert.deepEqual(logs, []);
+});
+
+test("clean PR auto-merges and Linear becomes Done", async () => {
+  const events: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-53", title: "Add generated artifact validators" };
+
+  const result = await runAutoMergeFinalize({
+    enabled: true,
+    mergeMethod: "squash",
+    pollIntervalMs: 1,
+    timeoutMs: 0,
+    issue,
+    prUrl: "https://github.com/owner/repo/pull/26",
+  }, {
+    fetchPullRequest: async () => ({
+      url: "https://github.com/owner/repo/pull/26",
+      state: "OPEN",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: "",
+      statusCheckRollup: [{ name: "validate", status: "COMPLETED", conclusion: "SUCCESS" }],
+    }),
+    mergePullRequest: async (method) => {
+      events.push(`merge:${method}`);
+      return { sha: "merge-sha", url: "https://github.com/owner/repo/pull/26" };
+    },
+    markDone: async (body) => {
+      events.push("done");
+      assert.match(body, /Pull request: https:\/\/github.com\/owner\/repo\/pull\/26/);
+      assert.match(body, /Merge SHA: `merge-sha`/);
+    },
+    addComment: async () => {
+      events.push("comment");
+    },
+    markBlocked: async () => {
+      events.push("blocked");
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.status, "merged");
+  assert.deepEqual(events, ["merge:squash", "done"]);
+});
+
+test("pending checks leave issue Ready to Merge", async () => {
+  const events: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-53", title: "Add generated artifact validators" };
+
+  const result = await runAutoMergeFinalize({
+    enabled: true,
+    mergeMethod: "squash",
+    pollIntervalMs: 1,
+    timeoutMs: 0,
+    issue,
+    prUrl: "https://github.com/owner/repo/pull/26",
+  }, {
+    fetchPullRequest: async () => ({
+      url: "https://github.com/owner/repo/pull/26",
+      state: "OPEN",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      statusCheckRollup: [{ name: "validate", status: "IN_PROGRESS" }],
+    }),
+    mergePullRequest: async () => {
+      events.push("merge");
+      return {};
+    },
+    markDone: async () => {
+      events.push("done");
+    },
+    addComment: async (body) => {
+      events.push("comment");
+      assert.match(body, /checks are still pending/i);
+    },
+    markBlocked: async () => {
+      events.push("blocked");
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.status, "waiting");
+  assert.deepEqual(events, ["comment"]);
+});
+
+test("failing checks do not merge", async () => {
+  const decision = evaluateAutoMergeReadiness({
+    url: "https://github.com/owner/repo/pull/26",
+    state: "OPEN",
+    isDraft: false,
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    statusCheckRollup: [{ name: "validate", status: "COMPLETED", conclusion: "FAILURE" }],
+  });
+
+  assert.equal(decision.action, "blocked");
+  assert.match(decision.reason, /checks failed/i);
+});
+
+test("merge API failure creates clear blocker", async () => {
+  const events: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-53", title: "Add generated artifact validators" };
+
+  const result = await runAutoMergeFinalize({
+    enabled: true,
+    mergeMethod: "squash",
+    pollIntervalMs: 1,
+    timeoutMs: 0,
+    issue,
+    prUrl: "https://github.com/owner/repo/pull/26",
+  }, {
+    fetchPullRequest: async () => ({
+      url: "https://github.com/owner/repo/pull/26",
+      state: "OPEN",
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      statusCheckRollup: [{ name: "validate", status: "COMPLETED", conclusion: "SUCCESS" }],
+    }),
+    mergePullRequest: async () => {
+      throw new Error("merge failed: branch protection rejected merge");
+    },
+    markDone: async () => {
+      events.push("done");
+    },
+    addComment: async () => {
+      events.push("comment");
+    },
+    markBlocked: async (body) => {
+      events.push("blocked");
+      assert.match(body, /branch protection rejected merge/);
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.deepEqual(events, ["blocked"]);
+});
+
+test("PR inspection failure leaves issue Ready to Merge with a retry comment", async () => {
+  const events: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-53", title: "Add generated artifact validators" };
+
+  const result = await runAutoMergeFinalize({
+    enabled: true,
+    mergeMethod: "squash",
+    pollIntervalMs: 1,
+    timeoutMs: 0,
+    issue,
+    prUrl: "https://github.com/owner/repo/pull/26",
+  }, {
+    fetchPullRequest: async () => {
+      throw new Error("gh pr view failed");
+    },
+    mergePullRequest: async () => {
+      events.push("merge");
+      return {};
+    },
+    markDone: async () => {
+      events.push("done");
+    },
+    addComment: async (body) => {
+      events.push("comment");
+      assert.match(body, /gh pr view failed/);
+    },
+    markBlocked: async () => {
+      events.push("blocked");
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.status, "waiting");
+  assert.deepEqual(events, ["comment"]);
+});
+
+test("AGENT_AUTO_MERGE=false preserves Ready to Merge behavior", async () => {
+  const events: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-53", title: "Add generated artifact validators" };
+
+  const result = await runAutoMergeFinalize({
+    enabled: false,
+    mergeMethod: "squash",
+    pollIntervalMs: 1,
+    timeoutMs: 0,
+    issue,
+    prUrl: "https://github.com/owner/repo/pull/26",
+  }, {
+    fetchPullRequest: async () => {
+      events.push("fetch");
+      return {};
+    },
+    mergePullRequest: async () => {
+      events.push("merge");
+      return {};
+    },
+    markDone: async () => {
+      events.push("done");
+    },
+    addComment: async () => {
+      events.push("comment");
+    },
+    markBlocked: async () => {
+      events.push("blocked");
+    },
+    sleep: async () => undefined,
+  });
+
+  assert.equal(result.status, "disabled");
+  assert.deepEqual(events, []);
 });
 
 test("passes Symphony unattended guardrail acknowledgement flag", () => {
