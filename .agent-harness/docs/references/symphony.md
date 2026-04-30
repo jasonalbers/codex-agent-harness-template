@@ -50,7 +50,7 @@ Ignored local state:
 - `LINEAR_PROJECT_SLUG`
 - `GITHUB_REPO`
 - `GITHUB_TOKEN`
-- `OPENAI_API_KEY`
+- Codex auth at `~/.codex/auth.json` or `CODEX_AUTH_FILE`
 - `CODEX_MODEL`
 - `AGENT_WORKSPACE_ROOT`
 - `AGENT_MAX_PARALLEL_RUNS`

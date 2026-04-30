@@ -24,7 +24,8 @@ A project is live-ready when:
 - Required Linear labels exist.
 - `LINEAR_API_KEY` is set in the runtime environment.
 - `GITHUB_TOKEN` is set in the runtime environment.
-- `OPENAI_API_KEY` is set in the runtime environment.
+- Codex auth is available at `~/.codex/auth.json`, or `CODEX_AUTH_FILE` points
+  to the auth file.
 - `AGENT_WORKSPACE_ROOT` points outside the source checkout.
 - The target repo has a validation command agents can run.
 - One setup issue has completed with a PR and proof of work.
