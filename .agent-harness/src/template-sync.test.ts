@@ -5,6 +5,8 @@ import { classifyTemplatePath, planFileChange, normalizeTemplateRepo } from "./t
 test("classifies owned, optional, protected, and product paths", () => {
   assert.equal(classifyTemplatePath("AGENTS.md", {}), "owned");
   assert.equal(classifyTemplatePath(".agent-harness/src/cli.ts", {}), "owned");
+  assert.equal(classifyTemplatePath(".agent-harness/.env.example", {}), "owned");
+  assert.equal(classifyTemplatePath(".agent-harness/.env.local", {}), "protected");
   assert.equal(classifyTemplatePath(".agent-harness/config/projects.example.json", {}), "owned");
   assert.equal(classifyTemplatePath(".agent-harness/config/projects.json", {}), "protected");
   assert.equal(classifyTemplatePath(".agent-harness/intake/inbox/idea.md", {}), "protected");
