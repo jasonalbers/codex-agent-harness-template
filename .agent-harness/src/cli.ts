@@ -222,6 +222,7 @@ function usage(): string {
     "",
     "Agent/Symphony:",
     "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--in-progress-state \"In Progress\"] [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent publish --project <name> --issue <identifier> [--dry-run]",
     "  node .agent-harness/dist/cli.js symphony bootstrap",
     "  node .agent-harness/dist/cli.js symphony preflight",
     "  node .agent-harness/dist/cli.js symphony run",
@@ -1064,6 +1065,13 @@ async function fetchOrderedAgentIssues(apiKey: string, projectSlug: string): Pro
   };
 }
 
+async function fetchAgentIssueByIdentifier(apiKey: string, projectSlug: string, identifier: string): Promise<{ issue: AgentOrderIssue; stateIds: Map<string, string> } | undefined> {
+  const context = await fetchOrderedAgentIssues(apiKey, projectSlug);
+  const issue = context?.readyIssues.find((candidate) => candidate.identifier.toLowerCase() === identifier.toLowerCase());
+  if (!context || !issue) return undefined;
+  return { issue, stateIds: context.stateIds };
+}
+
 async function updateLinearIssueState(apiKey: string, issue: AgentOrderIssue, stateId: string, stateName: string): Promise<void> {
   await linearGraphql(apiKey, `
     mutation UpdateAgentIssueState($id: String!, $input: IssueUpdateInput!) {
@@ -1711,6 +1719,60 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   return runCode;
 }
 
+async function agentPublish(flags: Record<string, string | boolean>): Promise<number> {
+  const projectName = typeof flags.project === "string" ? flags.project : "";
+  const issueIdentifier = typeof flags.issue === "string" ? flags.issue : "";
+  if (!projectName || !issueIdentifier) {
+    console.error("--project and --issue are required.");
+    return 1;
+  }
+  const dotenv = loadDotenv();
+  const apiKey = env("LINEAR_API_KEY", dotenv);
+  if (!apiKey) {
+    console.error("LINEAR_API_KEY is required.");
+    return 1;
+  }
+  const project = projectByName(projectName);
+  if (!project) {
+    console.error(`Unknown project: ${projectName}`);
+    return 1;
+  }
+  const workspaceRoot = env("AGENT_WORKSPACE_ROOT", dotenv);
+  if (!workspaceRoot) {
+    console.error("AGENT_WORKSPACE_ROOT is required.");
+    return 1;
+  }
+  const issueResult = await fetchAgentIssueByIdentifier(apiKey, project.linear_project_slug, issueIdentifier);
+  if (!issueResult) {
+    console.error(`Issue ${issueIdentifier} was not found in project ${project.linear_project_slug}.`);
+    return 1;
+  }
+  const dryRun = Boolean(flags["dry-run"]);
+  const workspace = workspaceForIssue(workspaceRoot, issueResult.issue);
+  if (dryRun) {
+    console.log(`Project: ${project.name}`);
+    console.log(`Issue: ${issueResult.issue.identifier}`);
+    console.log(`Workspace: ${workspace}`);
+    console.log(`Publishable changes: ${hasPublishableChanges(workspace)}`);
+    console.log(`Branch: ${agentBranchName(issueResult.issue)}`);
+    console.log("Dry run: no branch, commit, PR, or Linear update was created.");
+    return 0;
+  }
+  const publishResult = parentPublishWorkspace(project, issueResult.issue, workspaceRoot);
+  if (!publishResult.ok) {
+    console.error(`Parent publish failed: ${publishResult.message}`);
+    return 1;
+  }
+  if (publishResult.skipped) {
+    console.log(`Parent publish skipped: ${publishResult.message}`);
+    return 0;
+  }
+  console.log(`Published ${issueResult.issue.identifier} on ${publishResult.branch}`);
+  if (publishResult.prUrl) console.log(`Pull request: ${publishResult.prUrl}`);
+  await markIssueReadyToMerge(apiKey, issueResult.issue, issueResult.stateIds, parentPublishCommentBody(publishResult));
+  return 0;
+}
+
 async function main(): Promise<number> {
   const { group, action, positionals, flags } = parseArgs(process.argv.slice(2));
   if (group === "help" || group === "--help" || !group) {
@@ -1729,6 +1791,7 @@ async function main(): Promise<number> {
   if (group === "intake" && action === "compile") return intakeCompile(positionals[0] || "", flags);
   if (group === "intake" && action === "promote") return intakePromote(positionals[0] || "", flags);
   if (group === "agent" && action === "start") return agentStart(flags);
+  if (group === "agent" && action === "publish") return agentPublish(flags);
   if (group === "symphony" && action === "bootstrap") return symphonyBootstrap();
   if (group === "symphony" && action === "preflight") return symphonyPreflight();
   if (group === "symphony" && action === "run") return symphonyRun();

@@ -52,3 +52,13 @@ is `In Progress`.
 If the runner exits before completing work and parent publish cannot recover a
 completed workspace, the CLI moves the claimed issue to `Blocked` and adds a
 comment with the failed command and exit code.
+
+## Publish Existing Workspace
+
+If a previous runner completed work but failed during publish, recover without
+rerunning the worker:
+
+```bash
+node .agent-harness/dist/cli.js agent publish --project example-app --issue ABC-123 --dry-run
+node .agent-harness/dist/cli.js agent publish --project example-app --issue ABC-123
+```
