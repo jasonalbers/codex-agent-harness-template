@@ -335,6 +335,18 @@ export function codexAuthStatus(values: Record<string, string>, fileExists: (pat
   return { ok: fileExists(configuredPath), source };
 }
 
+export function githubAuthStatus(
+  _values: Record<string, string>,
+  runner: () => { code: number; output: string } = () => capture("gh", ["auth", "token"]),
+): { ok: boolean; source: string; token?: string } {
+  const result = runner();
+  const token = result.output.trim();
+  if (result.code === 0 && token) {
+    return { ok: true, source: "gh auth token", token };
+  }
+  return { ok: false, source: "gh auth token" };
+}
+
 function validateEnv(flags: Record<string, string | boolean>): number {
   const dotenv = loadDotenv();
   const softDefaults = {
@@ -343,7 +355,7 @@ function validateEnv(flags: Record<string, string | boolean>): number {
     SYMPHONY_REPO: "https://github.com/openai/symphony.git",
     SYMPHONY_REF: "58cf97da06d556c019ccea20c67f4f77da124bf3",
   };
-  const liveRequired = ["LINEAR_API_KEY", "LINEAR_PROJECT_SLUG", "GITHUB_REPO", "GITHUB_TOKEN", "AGENT_WORKSPACE_ROOT"];
+  const liveRequired = ["LINEAR_API_KEY", "LINEAR_PROJECT_SLUG", "GITHUB_REPO", "AGENT_WORKSPACE_ROOT"];
   const dryRun = Boolean(flags["dry-run"]) || boolValue(env("AGENT_DRY_RUN", dotenv), true);
   const strict = Boolean(flags.strict) || !dryRun;
   const missing: string[] = [];
@@ -367,6 +379,13 @@ function validateEnv(flags: Record<string, string | boolean>): number {
     printCheck(false, `Codex auth file is required at ${codexAuth.source}`);
   } else {
     printCheck(true, `Codex auth file ${codexAuth.ok ? `found at ${codexAuth.source}` : `not found at ${codexAuth.source}; acceptable in dry-run mode`}`);
+  }
+  const githubAuth = githubAuthStatus(merged);
+  if (strict && !githubAuth.ok) {
+    missing.push("GH_AUTH");
+    printCheck(false, "GitHub auth is required from gh auth token");
+  } else {
+    printCheck(true, `GitHub auth ${githubAuth.ok ? `available from ${githubAuth.source}` : "not available from gh auth token; acceptable in dry-run mode"}`);
   }
 
   if (missing.length > 0) {
@@ -557,7 +576,8 @@ function bootstrapProject(flags: Record<string, string | boolean>): number {
 function summarizeProjects(): number {
   const dotenv = loadDotenv();
   const config = loadProjects();
-  const envRequirements = ["LINEAR_API_KEY", "GITHUB_TOKEN", "AGENT_WORKSPACE_ROOT"];
+  const envRequirements = ["LINEAR_API_KEY", "AGENT_WORKSPACE_ROOT"];
+  const githubAuth = githubAuthStatus({ ...process.env, ...dotenv } as Record<string, string>);
   console.log(`Configured projects: ${config.projects.length}`);
   for (const project of config.projects) {
     const missing: string[] = [];
@@ -566,6 +586,7 @@ function summarizeProjects(): number {
     for (const name of envRequirements) {
       if (!env(name, dotenv)) missing.push(name);
     }
+    if (!githubAuth.ok) missing.push("gh auth token");
     console.log("");
     console.log(`${project.name}:`);
     console.log(`  repo: ${project.repo}`);
@@ -1205,14 +1226,18 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
   const blockers: string[] = [];
   if (!project.agent_enabled) blockers.push("project agent_enabled is false");
   if (isPlaceholder(project.linear_project_slug)) blockers.push("project Linear slug is a placeholder");
-  for (const name of ["LINEAR_API_KEY", "GITHUB_TOKEN", "AGENT_WORKSPACE_ROOT"]) {
+  for (const name of ["LINEAR_API_KEY", "AGENT_WORKSPACE_ROOT"]) {
     if (!env(name, dotenv)) blockers.push(`${name} is not set`);
   }
-  const codexAuth = codexAuthStatus({ ...process.env, ...dotenv } as Record<string, string>);
+  const mergedEnv = { ...process.env, ...dotenv } as Record<string, string>;
+  const codexAuth = codexAuthStatus(mergedEnv);
   if (!codexAuth.ok) blockers.push(`Codex auth file is not available at ${codexAuth.source}`);
+  const githubAuth = githubAuthStatus(mergedEnv);
+  if (!githubAuth.ok) blockers.push("GitHub auth is not available from gh auth token");
   const runEnv = {
     LINEAR_PROJECT_SLUG: project.linear_project_slug,
     GITHUB_REPO: project.repo,
+    ...(githubAuth.token ? { GITHUB_TOKEN: githubAuth.token } : {}),
     CODEX_MODEL: env("CODEX_MODEL", dotenv) || "gpt-5.5",
     AGENT_MAX_PARALLEL_RUNS: env("AGENT_MAX_PARALLEL_RUNS", dotenv) || "1",
   };

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { codexAuthStatus, linearIssueLabelsInput, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -61,5 +61,22 @@ test("accepts Codex auth file as worker authentication", () => {
   assert.deepEqual(codexAuthStatus({ OPENAI_API_KEY: "set" }, () => false), {
     ok: false,
     source: "~/.codex/auth.json",
+  });
+});
+
+test("accepts GitHub CLI auth when GITHUB_TOKEN is not set", () => {
+  assert.deepEqual(githubAuthStatus({}, () => ({ code: 0, output: "gh-token\n" })), {
+    ok: true,
+    source: "gh auth token",
+    token: "gh-token",
+  });
+  assert.deepEqual(githubAuthStatus({ GITHUB_TOKEN: "ignored" }, () => ({ code: 0, output: "gh-token\n" })), {
+    ok: true,
+    source: "gh auth token",
+    token: "gh-token",
+  });
+  assert.deepEqual(githubAuthStatus({}, () => ({ code: 1, output: "not logged in" })), {
+    ok: false,
+    source: "gh auth token",
   });
 });

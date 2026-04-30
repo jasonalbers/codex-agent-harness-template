@@ -49,7 +49,7 @@ Ignored local state:
 - `LINEAR_API_KEY`
 - `LINEAR_PROJECT_SLUG`
 - `GITHUB_REPO`
-- `GITHUB_TOKEN`
+- GitHub CLI auth from `gh auth token`
 - Codex auth at `~/.codex/auth.json` or `CODEX_AUTH_FILE`
 - `CODEX_MODEL`
 - `AGENT_WORKSPACE_ROOT`

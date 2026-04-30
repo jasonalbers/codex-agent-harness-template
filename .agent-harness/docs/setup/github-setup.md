@@ -6,7 +6,8 @@ Each configured project needs:
 
 - Repository name in `owner/name` form.
 - Default branch.
-- GitHub CLI authentication for local operations.
+- GitHub CLI authentication for local operations. The harness reads GitHub auth
+  from `gh auth token`; do not add `GITHUB_TOKEN` to `.agent-harness/.env`.
 - PR template and CI validation in the target repo when possible.
 
 ## Validate
