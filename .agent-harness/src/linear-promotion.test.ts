@@ -228,6 +228,112 @@ test("post-publish state transition fails without success log when state never s
   assert.deepEqual(logs, []);
 });
 
+test("post-publish state transition retries transient Linear mutation fetch failures", async () => {
+  const logs: string[] = [];
+  let mutationCalls = 0;
+  const issue = { id: "issue-id", identifier: "JAS-52", title: "Implement deterministic generator" };
+  const ready = { id: "issue-id", identifier: "JAS-52", state: { id: "ready-state-id", name: "Ready to Merge" } };
+
+  await runVerifiedLinearStateTransition({
+    issue,
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+    settleAttempts: 2,
+    settleMs: 1,
+  }, {
+    mutate: async () => {
+      mutationCalls += 1;
+      if (mutationCalls === 1) throw new Error("fetch failed");
+      return { data: { issueUpdate: { success: true, issue: ready } } };
+    },
+    fetchIssue: async () => ready,
+    sleep: async () => undefined,
+    log: (message: string) => logs.push(message),
+  });
+
+  assert.equal(mutationCalls, 2);
+  assert.deepEqual(logs, ["Updated issue state: JAS-52 -> Ready to Merge"]);
+});
+
+test("post-publish state transition retries transient Linear verification fetch failures", async () => {
+  const logs: string[] = [];
+  let fetchCalls = 0;
+  const issue = { id: "issue-id", identifier: "JAS-52", title: "Implement deterministic generator" };
+  const ready = { id: "issue-id", identifier: "JAS-52", state: { id: "ready-state-id", name: "Ready to Merge" } };
+
+  await runVerifiedLinearStateTransition({
+    issue,
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+    settleAttempts: 2,
+    settleMs: 1,
+  }, {
+    mutate: async () => ({ data: { issueUpdate: { success: true, issue: ready } } }),
+    fetchIssue: async () => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) throw new Error("fetch failed");
+      return ready;
+    },
+    sleep: async () => undefined,
+    log: (message: string) => logs.push(message),
+  });
+
+  assert.equal(fetchCalls, 3);
+  assert.deepEqual(logs, ["Updated issue state: JAS-52 -> Ready to Merge"]);
+});
+
+test("post-publish state transition retries transient Linear settle fetch failures", async () => {
+  const logs: string[] = [];
+  let fetchCalls = 0;
+  const issue = { id: "issue-id", identifier: "JAS-52", title: "Implement deterministic generator" };
+  const ready = { id: "issue-id", identifier: "JAS-52", state: { id: "ready-state-id", name: "Ready to Merge" } };
+
+  await runVerifiedLinearStateTransition({
+    issue,
+    stateId: "ready-state-id",
+    stateName: "Ready to Merge",
+    settleAttempts: 2,
+    settleMs: 1,
+  }, {
+    mutate: async () => ({ data: { issueUpdate: { success: true, issue: ready } } }),
+    fetchIssue: async () => {
+      fetchCalls += 1;
+      if (fetchCalls === 2) throw new Error("fetch failed");
+      return ready;
+    },
+    sleep: async () => undefined,
+    log: (message: string) => logs.push(message),
+  });
+
+  assert.equal(fetchCalls, 4);
+  assert.deepEqual(logs, ["Updated issue state: JAS-52 -> Ready to Merge"]);
+});
+
+test("post-publish state transition reports repeated Linear fetch failures without success log", async () => {
+  const logs: string[] = [];
+  const issue = { id: "issue-id", identifier: "JAS-52", title: "Implement deterministic generator" };
+
+  await assert.rejects(
+    runVerifiedLinearStateTransition({
+      issue,
+      stateId: "ready-state-id",
+      stateName: "Ready to Merge",
+      settleAttempts: 1,
+      settleMs: 1,
+    }, {
+      mutate: async () => {
+        throw new Error("fetch failed");
+      },
+      fetchIssue: async () => undefined,
+      sleep: async () => undefined,
+      log: (message: string) => logs.push(message),
+    }),
+    /fetch failed/,
+  );
+
+  assert.deepEqual(logs, []);
+});
+
 test("passes Symphony unattended guardrail acknowledgement flag", () => {
   assert.deepEqual(symphonyRunArgs("/tmp/workflow.md", "/tmp/logs", "4007"), [
     "/tmp/workflow.md",

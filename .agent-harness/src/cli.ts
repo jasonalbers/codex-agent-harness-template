@@ -1032,6 +1032,10 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function verifyLinearStateTransitionResult(result: {
   mutationIssue?: LinearIssueStateUpdateIssue | null;
   queryIssue?: LinearIssueStateUpdateIssue | null;
@@ -1075,43 +1079,51 @@ export async function runVerifiedLinearStateTransition(input: LinearStateTransit
   let lastMutationResult: Record<string, any> | undefined;
   let lastVerifiedIssue: LinearIssueStateUpdateIssue | undefined;
   let lastErrors: string[] = [];
+  let lastThrownError: unknown;
 
   for (let attempt = 0; attempt <= settleAttempts; attempt += 1) {
     if (attempt > 0 && settleMs > 0) await sleepFn(settleMs);
 
-    const mutationResult = await deps.mutate();
-    lastMutationResult = mutationResult;
-    const mutation = mutationResult.data?.issueUpdate;
-    const verifiedIssue = await deps.fetchIssue();
-    lastVerifiedIssue = verifiedIssue;
-    const errors = verifyLinearStateTransitionResult({
-      mutationIssue: mutation?.issue,
-      queryIssue: verifiedIssue,
-      success: mutation?.success,
-    }, { issueId: input.issue.id, stateId: input.stateId, stateName: input.stateName });
-    lastErrors = errors;
-    if (errors.length > 0) continue;
-
-    if (settleMs > 0) {
-      await sleepFn(settleMs);
-      const settledIssue = await deps.fetchIssue();
-      lastVerifiedIssue = settledIssue;
-      const settleErrors = verifyLinearStateTransitionResult({
+    try {
+      const mutationResult = await deps.mutate();
+      lastMutationResult = mutationResult;
+      const mutation = mutationResult.data?.issueUpdate;
+      const verifiedIssue = await deps.fetchIssue();
+      lastVerifiedIssue = verifiedIssue;
+      const errors = verifyLinearStateTransitionResult({
         mutationIssue: mutation?.issue,
-        queryIssue: settledIssue,
+        queryIssue: verifiedIssue,
         success: mutation?.success,
       }, { issueId: input.issue.id, stateId: input.stateId, stateName: input.stateName });
-      lastErrors = settleErrors;
-      if (settleErrors.length > 0) continue;
-    }
+      lastErrors = errors;
+      if (errors.length > 0) continue;
 
-    logFn(`Updated issue state: ${input.issue.identifier} -> ${input.stateName}`);
-    return;
+      if (settleMs > 0) {
+        await sleepFn(settleMs);
+        const settledIssue = await deps.fetchIssue();
+        lastVerifiedIssue = settledIssue;
+        const settleErrors = verifyLinearStateTransitionResult({
+          mutationIssue: mutation?.issue,
+          queryIssue: settledIssue,
+          success: mutation?.success,
+        }, { issueId: input.issue.id, stateId: input.stateId, stateName: input.stateName });
+        lastErrors = settleErrors;
+        if (settleErrors.length > 0) continue;
+      }
+
+      logFn(`Updated issue state: ${input.issue.identifier} -> ${input.stateName}`);
+      return;
+    } catch (error) {
+      lastThrownError = error;
+      lastErrors = [`Linear state transition attempt ${attempt + 1} failed: ${errorMessage(error)}`];
+      continue;
+    }
   }
 
   throw new Error([
     `Linear state update verification failed for ${input.issue.identifier} -> ${input.stateName}.`,
     ...lastErrors.map((error) => `- ${error}`),
+    ...(lastThrownError ? ["", `Last thrown error: ${errorMessage(lastThrownError)}`] : []),
     "",
     "Mutation response:",
     compactJson(lastMutationResult ?? null),
@@ -1317,7 +1329,7 @@ export function requiredLinearStateId(stateIds: Map<string, string>, stateName: 
 
 async function markIssueReadyToMerge(apiKey: string, issue: AgentOrderIssue, stateIds: Map<string, string>, body: string): Promise<void> {
   const readyStateId = requiredLinearStateId(stateIds, "Ready to Merge");
-  await updateLinearIssueState(apiKey, issue, readyStateId, "Ready to Merge", { settleMs: 2500, settleAttempts: 2 });
+  await updateLinearIssueState(apiKey, issue, readyStateId, "Ready to Merge", { settleMs: 2500, settleAttempts: 4 });
   await addLinearIssueComment(apiKey, issue, body);
 }
 
