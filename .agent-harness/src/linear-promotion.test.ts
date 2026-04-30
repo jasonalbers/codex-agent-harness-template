@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -110,4 +110,32 @@ test("generated Symphony workflow uses current Codex app-server policy values", 
   assert.doesNotMatch(workflow, /reject/);
   assert.match(workflow, /thread_sandbox:\s+workspace-write/);
   assert.match(workflow, /type:\s+workspaceWrite/);
+});
+
+test("patches Symphony app-server to decline unattended MCP elicitation requests", () => {
+  const source = `defmodule SymphonyElixir.Codex.AppServer do
+  defp maybe_handle_approval_request(
+         _port,
+         _method,
+         _payload,
+         _payload_string,
+         _on_message,
+         _metadata,
+         _tool_executor,
+         _auto_approve_requests
+       ) do
+    :unhandled
+  end
+end
+`;
+
+  const patched = patchSymphonyAppServerSource(source);
+  assert.equal(patched.changed, true);
+  assert.match(patched.text, /"mcpServer\/elicitation\/request"/);
+  assert.match(patched.text, /"action" => "decline"/);
+  assert.match(patched.text, /:tool_input_auto_answered/);
+
+  const repatched = patchSymphonyAppServerSource(patched.text);
+  assert.equal(repatched.changed, false);
+  assert.equal(repatched.text, patched.text);
 });

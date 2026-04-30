@@ -31,6 +31,13 @@ This prevents the pinned Symphony implementation from falling back to older
 object-form approval defaults that current Codex app-server builds no longer
 accept.
 
+The CLI also applies a small compatibility patch to the bootstrapped Symphony
+source before building or running it. Current Codex app-server builds can emit
+`mcpServer/elicitation/request` during unattended MCP flows. The pinned Symphony
+reference handles older `item/tool/requestUserInput` prompts, but not that newer
+method. The harness patch declines those elicitations with a valid non-interactive
+response so live runs fail or continue explicitly instead of waiting forever.
+
 ## Current Boundary
 
 The upstream reference implementation is Linear-first. If a future project must

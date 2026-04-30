@@ -1201,6 +1201,76 @@ function symphonyRoot(): string {
   return join(HARNESS_ROOT, ".symphony");
 }
 
+const SYMPHONY_MCP_ELICITATION_PATCH_MARKER = "mcpServer/elicitation/request";
+
+const SYMPHONY_MCP_ELICITATION_PATCH = `  defp maybe_handle_approval_request(
+         port,
+         "mcpServer/elicitation/request",
+         %{"id" => id} = payload,
+         payload_string,
+         on_message,
+         metadata,
+         _tool_executor,
+         _auto_approve_requests
+       ) do
+    send_message(port, %{
+      "id" => id,
+      "result" => %{
+        "action" => "decline",
+        "content" => nil
+      }
+    })
+
+    emit_message(
+      on_message,
+      :tool_input_auto_answered,
+      %{payload: payload, raw: payload_string, answer: @non_interactive_tool_input_answer},
+      metadata
+    )
+
+    :approved
+  end
+
+`;
+
+export function patchSymphonyAppServerSource(source: string): { text: string; changed: boolean } {
+  if (source.includes(SYMPHONY_MCP_ELICITATION_PATCH_MARKER)) {
+    return { text: source, changed: false };
+  }
+
+  const anchor = "  defp maybe_handle_approval_request(\n         _port,\n         _method,";
+  if (!source.includes(anchor)) {
+    throw new Error("Could not find Symphony app-server approval fallback anchor.");
+  }
+
+  return {
+    text: source.replace(anchor, SYMPHONY_MCP_ELICITATION_PATCH + anchor),
+    changed: true,
+  };
+}
+
+function applySymphonyCompatibilityPatches(upstream: string): { ok: boolean; changed: boolean } {
+  const appServerPath = join(upstream, "elixir", "lib", "symphony_elixir", "codex", "app_server.ex");
+  if (!existsSync(appServerPath)) {
+    console.error(`Missing Symphony app-server source: ${appServerPath}`);
+    return { ok: false, changed: false };
+  }
+
+  try {
+    const source = readFileSync(appServerPath, "utf8");
+    const patched = patchSymphonyAppServerSource(source);
+    if (patched.changed) {
+      writeFileSync(appServerPath, patched.text, "utf8");
+      console.log("Applied Symphony compatibility patch: decline unattended MCP elicitation requests.");
+    }
+    return { ok: true, changed: patched.changed };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Failed to apply Symphony compatibility patch: ${message}`);
+    return { ok: false, changed: false };
+  }
+}
+
 function symphonyBootstrap(): number {
   const dotenv = loadDotenv();
   const repo = env("SYMPHONY_REPO", dotenv) || "https://github.com/openai/symphony.git";
@@ -1218,6 +1288,8 @@ function symphonyBootstrap(): number {
   if (fetchCode !== 0) return fetchCode;
   const checkoutCode = run("git", ["checkout", "--detach", ref], upstream);
   if (checkoutCode !== 0) return checkoutCode;
+  const patchResult = applySymphonyCompatibilityPatches(upstream);
+  if (!patchResult.ok) return 1;
   if (capture("mise", ["--version"]).code !== 0) {
     console.log("Symphony source is present, but mise is not installed. Install mise before building upstream Symphony.");
     return 0;
@@ -1294,6 +1366,16 @@ function symphonyRun(extraEnv: Record<string, string> = {}): number {
   if (!existsSync(upstream)) {
     console.error("Symphony reference implementation is not bootstrapped. Run symphony bootstrap first.");
     return 1;
+  }
+  const patchResult = applySymphonyCompatibilityPatches(join(symphonyRoot(), "openai-symphony"));
+  if (!patchResult.ok) return 1;
+  if (patchResult.changed) {
+    if (capture("mise", ["--version"]).code !== 0) {
+      console.error("Symphony compatibility patch changed source, but mise is not installed to rebuild the Symphony binary.");
+      return 1;
+    }
+    const rebuildCode = run("mise", ["exec", "--", "mix", "build"], upstream, merged);
+    if (rebuildCode !== 0) return rebuildCode;
   }
   const workflow = generateWorkflow(merged);
   const logsRoot = merged.SYMPHONY_LOGS_ROOT || join(symphonyRoot(), "logs");
