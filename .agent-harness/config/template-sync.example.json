@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "template": {
+    "repo": "owner/repo",
+    "ref": "main",
+    "last_synced_sha": "",
+    "last_synced_at": ""
+  }
+}

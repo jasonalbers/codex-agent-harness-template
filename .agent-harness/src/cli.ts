@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { handleTemplateCommand } from "./template-sync.js";
 
 type ParsedArgs = {
   group: string;
@@ -71,6 +72,8 @@ const REQUIRED_FILES = [
   ".agent-harness/roles/chatgpt-web.md",
   ".agent-harness/roles/codex.md",
   ".agent-harness/roles/shared-rules.md",
+  ".agent-harness/config/template-sync.json",
+  ".agent-harness/config/template-sync.example.json",
   ".agent-harness/docs/README.md",
   ".agent-harness/docs/UI_UX.md",
   ".agent-harness/docs/FRONTEND.md",
@@ -83,6 +86,7 @@ const REQUIRED_FILES = [
   ".agent-harness/docs/templates/conversation-ledger.template.md",
   ".agent-harness/docs/templates/linear-issue-bundle.template.md",
   ".agent-harness/docs/runbooks/chatgpt-to-linear.md",
+  ".agent-harness/docs/runbooks/template-sync.md",
   ".agent-harness/intake/README.md",
   ".agent-harness/config/projects.example.json",
   ".agent-harness/config/linear.example.json",
@@ -151,6 +155,12 @@ function usage(): string {
     "  node .agent-harness/dist/cli.js validate repo",
     "  node .agent-harness/dist/cli.js project bootstrap --name <name> --repo <owner/repo> --linear-slug <slug> [--enable-agent] [--dry-run] [--force]",
     "  node .agent-harness/dist/cli.js project summary",
+    "",
+    "Template sync:",
+    "  node .agent-harness/dist/cli.js template init --repo <owner/repo|git-url> [--ref main] [--sha <template-sha>] [--force]",
+    "  node .agent-harness/dist/cli.js template status [--repo <owner/repo|git-url>] [--ref main]",
+    "  node .agent-harness/dist/cli.js template diff [--from <sha>] [--to <sha|ref>] [--include-readme] [--include-gitignore]",
+    "  node .agent-harness/dist/cli.js template sync [--dry-run] [--apply] [--from <sha>] [--to <sha|ref>] [--include-readme] [--include-gitignore] [--force]",
     "",
     "ChatGPT web idea intake:",
     "  node .agent-harness/dist/cli.js intake new --idea-id <id> [--name <name>]",
@@ -369,7 +379,7 @@ function validateRepo(): number {
     if (!ok) errors.push(`missing directory ${dir}`);
   }
   for (const jsonFile of [
-    ...["agents.example.json", "linear.example.json", "projects.example.json", "workflow.example.json"].map((name) => join(HARNESS_ROOT, "config", name)),
+    ...["agents.example.json", "linear.example.json", "projects.example.json", "template-sync.example.json", "template-sync.json", "workflow.example.json"].map((name) => join(HARNESS_ROOT, "config", name)),
     join(HARNESS_ROOT, "package.json"),
     join(HARNESS_ROOT, "tsconfig.json"),
   ]) {
@@ -942,6 +952,7 @@ async function main(): Promise<number> {
   if (group === "validate" && action === "repo") return validateRepo();
   if (group === "project" && action === "bootstrap") return bootstrapProject(flags);
   if (group === "project" && action === "summary") return summarizeProjects();
+  if (group === "template") return handleTemplateCommand(action, positionals, flags, PROJECT_ROOT);
   if (group === "linear" && action === "create") return createLinearIssues(resolve(PROJECT_ROOT, positionals[0] || ""), flags);
   if (group === "linear" && action === "sync") return syncLinear(flags);
   if (group === "intake" && action === "new") return intakeNew(flags);

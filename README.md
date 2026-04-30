@@ -144,6 +144,18 @@ The intake pipeline preserves:
 - Epics.
 - Small Linear-ready issues.
 
+## Pull Template Updates Into A Derived Repo
+
+Repos created from this template can pull future harness updates with:
+
+```bash
+node .agent-harness/dist/cli.js template status
+node .agent-harness/dist/cli.js template sync --dry-run
+node .agent-harness/dist/cli.js template sync --apply
+```
+
+The sync command applies only template-owned files and protects product-specific work.
+
 ## Project Setup
 
 Add a target project:
