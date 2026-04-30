@@ -13,6 +13,19 @@ export type LinearIssueDescriptionInput = {
   metadata: Record<string, string>;
   sections: Record<string, string>;
   issue: LinearIssueForDescription;
+  order?: {
+    index: number;
+    total: number;
+  };
+};
+
+export type LinearIssueTitleInput = {
+  ideaId: string;
+  title: string;
+  order: {
+    index: number;
+    total: number;
+  };
 };
 
 const CONTEXT_SECTIONS = [
@@ -41,13 +54,34 @@ function renderIdeaContext(sections: Record<string, string>): string[] {
   return lines;
 }
 
+function padOrder(value: number, total: number): string {
+  return String(value).padStart(Math.max(2, String(total).length), "0");
+}
+
+export function formatLinearIssueTitle(input: LinearIssueTitleInput): string {
+  const sequence = `${padOrder(input.order.index, input.order.total)}/${padOrder(input.order.total, input.order.total)}`;
+  return `[${input.ideaId} ${sequence}] ${input.title}`;
+}
+
+function renderAgentExecutionOrder(order: { index: number; total: number } | undefined): string[] {
+  if (!order) return [];
+  return [
+    "## Agent Execution Order",
+    "",
+    `- Sequence: ${padOrder(order.index, order.total)}/${padOrder(order.total, order.total)}`,
+    "- Rule: Run lower sequence issues first. If multiple sequenced issues are Ready for Agent, start the lowest sequence first.",
+    "",
+  ];
+}
+
 export function renderLinearIssueDescription(input: LinearIssueDescriptionInput): string {
-  const { metadata, sections, issue } = input;
+  const { metadata, sections, issue, order } = input;
   return [
     "## Source Idea", "",
     `- Idea: ${metadata.idea_name}`,
     `- Idea ID: ${metadata.idea_id}`,
     "",
+    ...renderAgentExecutionOrder(order),
     ...renderIdeaContext(sections),
     "## Goal", "", issue.goal, "",
     "## User Value", "", issue.userValue, "",

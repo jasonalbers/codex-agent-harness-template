@@ -94,6 +94,13 @@ The live promotion command verifies that created issues are unarchived, belong
 to the target project, appear in the project's normal issue list, and contain
 the expected promoted description content.
 
+Promoted issue titles include the Idea Pack id and sequence so the source and
+order are visible in Linear list views:
+
+```text
+[example-idea 01/04] Define first workflow
+```
+
 ## 8. Start Agent Work
 
 Only after human review, move selected Linear issues to `Ready for Agent`.

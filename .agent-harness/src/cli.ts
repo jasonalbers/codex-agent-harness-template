@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { renderLinearIssueDescription } from "./intake-format.js";
+import { formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
 import { handleTemplateCommand } from "./template-sync.js";
 
 type ParsedArgs = {
@@ -59,6 +59,22 @@ type CreatedLinearIssue = {
     id?: string;
     slugId?: string;
   } | null;
+};
+
+export type AgentOrderIssue = {
+  id: string;
+  identifier: string;
+  title: string;
+  description?: string | null;
+  state?: {
+    name?: string | null;
+  } | null;
+};
+
+export type OrderedAgentRunPlan = {
+  selected?: AgentOrderIssue;
+  holdIssues: AgentOrderIssue[];
+  readyIssues: AgentOrderIssue[];
 };
 
 type ValidationResult = {
@@ -187,7 +203,7 @@ function usage(): string {
     "  node .agent-harness/dist/cli.js linear sync [--dry-run] [--project-slug <slug>]",
     "",
     "Agent/Symphony:",
-    "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--dry-run]",
+    "  node .agent-harness/dist/cli.js agent start --project <name> [--issue <id>] [--hold-state Todo] [--dry-run]",
     "  node .agent-harness/dist/cli.js symphony bootstrap",
     "  node .agent-harness/dist/cli.js symphony preflight",
     "  node .agent-harness/dist/cli.js symphony run",
@@ -545,6 +561,32 @@ function loadIssueBundle(path: string): Array<{ title: string; description: stri
   return parseMarkdownIssues(path);
 }
 
+function issueNumber(identifier: string): number {
+  const match = identifier.match(/-(\d+)$/);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function issueSequence(description: string | null | undefined): number {
+  const match = (description || "").match(/^\s*-\s*Sequence:\s*(\d+)\s*\/\s*\d+\s*$/m);
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+function compareAgentOrder(a: AgentOrderIssue, b: AgentOrderIssue): number {
+  const sequenceDiff = issueSequence(a.description) - issueSequence(b.description);
+  if (sequenceDiff !== 0) return sequenceDiff;
+  const numberDiff = issueNumber(a.identifier) - issueNumber(b.identifier);
+  if (numberDiff !== 0) return numberDiff;
+  return a.identifier.localeCompare(b.identifier);
+}
+
+export function planOrderedAgentRun(issues: AgentOrderIssue[]): OrderedAgentRunPlan {
+  const readyIssues = issues
+    .filter((issue) => issue.state?.name === "Ready for Agent")
+    .sort(compareAgentOrder);
+  const [selected, ...holdIssues] = readyIssues;
+  return { selected, holdIssues, readyIssues };
+}
+
 async function linearGraphql(apiKey: string, query: string, variables: Record<string, unknown>): Promise<Record<string, any>> {
   const response = await fetch("https://api.linear.app/graphql", {
     method: "POST",
@@ -626,6 +668,74 @@ async function verifyLinearPromotion(apiKey: string, projectId: string, projectS
     }
   }
   return errors;
+}
+
+async function fetchOrderedAgentIssues(apiKey: string, projectSlug: string): Promise<{ projectId: string; readyIssues: AgentOrderIssue[]; stateIds: Map<string, string> } | undefined> {
+  const result = await linearGraphql(apiKey, `
+    query AgentOrderProject($slug: String!) {
+      projects(filter: { slugId: { eq: $slug } }, first: 1) {
+        nodes {
+          id
+          teams(first: 10) {
+            nodes {
+              states(first: 100) { nodes { id name } }
+            }
+          }
+          issues(first: 100) {
+            nodes {
+              id
+              identifier
+              title
+              description
+              state { name }
+            }
+          }
+        }
+      }
+    }
+  `, { slug: projectSlug });
+  const project = result.data?.projects?.nodes?.[0];
+  if (!project?.id) return undefined;
+  const stateIds = new Map<string, string>();
+  for (const team of project.teams?.nodes ?? []) {
+    for (const state of team.states?.nodes ?? []) {
+      if (state.name && state.id && !stateIds.has(state.name)) stateIds.set(state.name, state.id);
+    }
+  }
+  return {
+    projectId: project.id,
+    readyIssues: (project.issues?.nodes ?? []) as AgentOrderIssue[],
+    stateIds,
+  };
+}
+
+async function enforceAgentIssueOrder(apiKey: string, projectSlug: string, holdStateName: string): Promise<number> {
+  const context = await fetchOrderedAgentIssues(apiKey, projectSlug);
+  if (!context) {
+    console.error(`No Linear project found for slug ${projectSlug}.`);
+    return 1;
+  }
+  const plan = planOrderedAgentRun(context.readyIssues);
+  if (!plan.selected) {
+    console.error(`No Ready for Agent issues found in project ${projectSlug}.`);
+    return 1;
+  }
+  console.log(`Next Ready for Agent issue: ${plan.selected.identifier} ${plan.selected.title}`);
+  if (plan.holdIssues.length === 0) return 0;
+  const holdStateId = context.stateIds.get(holdStateName);
+  if (!holdStateId) {
+    console.error(`Cannot hold later Ready for Agent issues because Linear state ${holdStateName} was not found.`);
+    return 1;
+  }
+  for (const issue of plan.holdIssues) {
+    await linearGraphql(apiKey, `
+      mutation HoldLaterReadyIssue($id: String!, $input: IssueUpdateInput!) {
+        issueUpdate(id: $id, input: $input) { success issue { identifier state { name } } }
+      }
+    `, { id: issue.id, input: { stateId: holdStateId } });
+    console.log(`Held later issue until its turn: ${issue.identifier} -> ${holdStateName}`);
+  }
+  return 0;
 }
 
 async function createLinearIssues(path: string, flags: Record<string, string | boolean>): Promise<number> {
@@ -816,18 +926,28 @@ function printIdeaValidation(result: ValidationResult): void {
   console.log(result.ok ? "Idea Pack validation passed." : "Idea Pack validation failed.");
 }
 
-function issueDescription(issue: LinearIssue, pack: IdeaPack): string {
-  return renderLinearIssueDescription({ metadata: pack.metadata, sections: pack.sections, issue });
+function issueDescription(issue: LinearIssue, pack: IdeaPack, order?: { index: number; total: number }): string {
+  return renderLinearIssueDescription({ metadata: pack.metadata, sections: pack.sections, issue, order });
 }
 
 function writeCompiledPack(pack: IdeaPack, outDir: string): void {
   mkdirSync(outDir, { recursive: true });
-  const issues = pack.issues.map((issue) => ({ title: issue.title, description: issueDescription(issue, pack) }));
+  const issues = pack.issues.map((issue, index) => ({
+    title: formatLinearIssueTitle({
+      ideaId: pack.metadata.idea_id,
+      title: issue.title,
+      order: { index: index + 1, total: pack.issues.length },
+    }),
+    description: issueDescription(issue, pack, { index: index + 1, total: pack.issues.length }),
+  }));
   writeFileSync(join(outDir, "source-idea-pack.md"), pack.raw, "utf8");
   writeFileSync(join(outDir, "idea-passport.md"), renderIdeaPassport(pack), "utf8");
   writeFileSync(join(outDir, "conversation-ledger.md"), renderConversationLedger(pack), "utf8");
   writeFileSync(join(outDir, "linear-issues.json"), `${JSON.stringify({ issues }, null, 2)}\n`, "utf8");
-  writeFileSync(join(outDir, "linear-issues.md"), ["# Linear Issue Bundle", "", `Source idea: ${pack.metadata.idea_name}`, "", ...pack.issues.flatMap((issue) => [`## Issue: ${issue.title}`, "", issueDescription(issue, pack), ""])].join("\n"), "utf8");
+  writeFileSync(join(outDir, "linear-issues.md"), ["# Linear Issue Bundle", "", `Source idea: ${pack.metadata.idea_name}`, "", ...pack.issues.flatMap((issue, index) => {
+    const order = { index: index + 1, total: pack.issues.length };
+    return [`## Issue: ${formatLinearIssueTitle({ ideaId: pack.metadata.idea_id, title: issue.title, order })}`, "", issueDescription(issue, pack, order), ""];
+  })].join("\n"), "utf8");
   writeFileSync(join(outDir, "promotion-report.md"), ["# Promotion Report", "", `- Idea ID: ${pack.metadata.idea_id}`, `- Idea name: ${pack.metadata.idea_name}`, `- Issues ready for Linear: ${pack.issues.length}`, "", "## Human Review Checklist", "", "- [ ] Idea Pack validation passed.", "- [ ] Open questions are answered or explicitly deferred.", "- [ ] Deferred ideas are preserved.", "- [ ] Each issue is small enough for one pull request.", "- [ ] Created Linear issues should not be moved to Ready for Agent until reviewed."].join("\n"), "utf8");
 }
 
@@ -981,7 +1101,7 @@ function symphonyRun(extraEnv: Record<string, string> = {}): number {
   return run(binary, [workflow, "--logs-root", logsRoot, "--port", port], upstream, merged);
 }
 
-function agentStart(flags: Record<string, string | boolean>): number {
+async function agentStart(flags: Record<string, string | boolean>): Promise<number> {
   const projectName = typeof flags.project === "string" ? flags.project : "";
   if (!projectName) {
     console.error("--project is required.");
@@ -989,6 +1109,7 @@ function agentStart(flags: Record<string, string | boolean>): number {
   }
   const dotenv = loadDotenv();
   const dryRun = Boolean(flags["dry-run"]) || boolValue(env("AGENT_DRY_RUN", dotenv), true);
+  const holdStateName = typeof flags["hold-state"] === "string" ? flags["hold-state"] : env("AGENT_READY_HOLD_STATE", dotenv) || "Todo";
   const project = projectByName(projectName);
   if (!project) {
     console.error(`Unknown project: ${projectName}`);
@@ -1010,6 +1131,7 @@ function agentStart(flags: Record<string, string | boolean>): number {
   console.log(`GitHub repo: ${project.repo}`);
   console.log(`Linear slug: ${project.linear_project_slug}`);
   console.log(`Agent enabled: ${project.agent_enabled}`);
+  console.log(`Ready ordering hold state: ${holdStateName}`);
   if (dryRun) {
     console.log("Dry run: no Symphony or Codex process started.");
     console.log("Resolved live runner inputs:");
@@ -1030,6 +1152,8 @@ function agentStart(flags: Record<string, string | boolean>): number {
     blockers.forEach((blocker) => console.log(`- ${blocker}`));
     return 1;
   }
+  const orderingCode = await enforceAgentIssueOrder(env("LINEAR_API_KEY", dotenv), project.linear_project_slug, holdStateName);
+  if (orderingCode !== 0) return orderingCode;
   return symphonyRun(runEnv);
 }
 

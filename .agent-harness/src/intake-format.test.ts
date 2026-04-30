@@ -1,6 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { renderLinearIssueDescription } from "./intake-format.js";
+import { formatLinearIssueTitle, renderLinearIssueDescription } from "./intake-format.js";
+
+test("formats Linear issue titles with Idea Pack source and sequence", () => {
+  assert.equal(
+    formatLinearIssueTitle({
+      ideaId: "operator-os-generated-disposable-software",
+      title: "Define Operator OS Wave 1 product boundary",
+      order: { index: 1, total: 14 },
+    }),
+    "[operator-os-generated-disposable-software 01/14] Define Operator OS Wave 1 product boundary",
+  );
+});
 
 test("renders Linear issue descriptions with concise Idea Context", () => {
   const description = renderLinearIssueDescription({
@@ -26,9 +37,12 @@ test("renders Linear issue descriptions with concise Idea Context", () => {
       verification: "Run documentation validation.",
       notesForAgent: "Use business language.",
     },
+    order: { index: 1, total: 3 },
   });
 
   assert.match(description, /## Source Idea/);
+  assert.match(description, /## Agent Execution Order/);
+  assert.match(description, /Sequence: 01\/03/);
   assert.match(description, /## Idea Context/);
   assert.match(description, /### Summary/);
   assert.match(description, /Recover missed revenue/);

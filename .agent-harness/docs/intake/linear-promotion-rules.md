@@ -37,7 +37,10 @@ compiled artifact first.
 
 Each promoted issue should include:
 
+- A title prefixed with Idea Pack id and sequence, such as
+  `[example-idea 01/04] Define first workflow`.
 - Source idea.
+- Agent execution order.
 - A concise Idea Context block with summary, core workflows, decisions, risks,
   open questions, and deferred ideas.
 - The issue-specific goal, user value, acceptance criteria, out of scope,
