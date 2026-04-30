@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, codexAuthStatus, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, publishPreflight, renderWorkflow, symphonyRunArgs, textFilesForValidation, verifyCreatedLinearIssue } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -92,6 +92,14 @@ test("publish preflight reports setup blockers before claiming work", () => {
   });
 });
 
+test("formats parent-published agent branch names", () => {
+  assert.equal(agentBranchName({
+    id: "issue-id",
+    identifier: "JAS-47",
+    title: "Define Operator OS Wave 1 product boundary",
+  }), "agent/jas-47-define-operator-os-wave-1-product-boundary");
+});
+
 test("passes Symphony unattended guardrail acknowledgement flag", () => {
   assert.deepEqual(symphonyRunArgs("/tmp/workflow.md", "/tmp/logs", "4007"), [
     "/tmp/workflow.md",
@@ -121,6 +129,7 @@ test("generated Symphony workflow uses current Codex app-server policy values", 
   assert.doesNotMatch(workflow, /reject/);
   assert.match(workflow, /thread_sandbox:\s+workspace-write/);
   assert.match(workflow, /type:\s+workspaceWrite/);
+  assert.match(workflow, /The parent `.agent-harness` CLI owns branch creation/);
 });
 
 test("patches Symphony app-server to decline unattended MCP elicitation requests", () => {

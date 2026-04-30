@@ -3,17 +3,18 @@
 1. Select the next eligible Linear issue by agent execution order.
 2. Create isolated workspace.
 3. Clone target GitHub repo.
-4. Create branch: `agent/<linear-issue-id>-short-description`.
+4. Move the selected Linear issue to `In Progress`.
 5. Read repo instructions.
 6. Create or update an execution plan.
 7. Implement the smallest useful change.
 8. Run validation.
 9. Write proof of work.
-10. Push branch.
-11. Open pull request.
-12. Move Linear status to `Ready to Merge`.
-13. Merge or complete the work when verification and workflow policy allow it.
-14. Move Linear status to `Done`, or `Blocked` with an explanatory comment if the run cannot continue.
+10. Parent CLI creates branch: `agent/<linear-issue-id>-short-description`.
+11. Parent CLI commits publishable workspace changes.
+12. Parent CLI pushes the branch and opens the pull request.
+13. Parent CLI moves Linear status to `Ready to Merge`.
+14. Merge or complete the work when verification and workflow policy allow it.
+15. Move Linear status to `Done`, or `Blocked` with an explanatory comment if the run cannot continue.
 
 ## Ordered Pickup
 
@@ -29,5 +30,6 @@ This lets a user mark several issues as `Ready for Agent` without allowing the
 runner to skip ahead in a sequential work plan.
 
 The normal user handoff is only `Backlog` or `Todo` to `Ready for Agent`. After
-that, Codex/Symphony owns status movement, proof of work, PR handling, merge or
-completion, and blocked/error reporting.
+that, Codex/Symphony owns implementation and verification, while the parent CLI
+owns branch creation, commit, PR handling, status movement, and blocked/error
+reporting from the verified host environment.

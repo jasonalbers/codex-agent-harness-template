@@ -26,6 +26,12 @@ disposable clone under `AGENT_WORKSPACE_ROOT`, local branch creation, writable
 Relative `AGENT_WORKSPACE_ROOT` values are resolved from the repository root
 before they are passed to Symphony.
 
+Codex/Symphony only implements and verifies the issue inside the isolated
+workspace. After the worker exits, the parent CLI publishes from the verified
+host environment: it creates the branch, commits publishable changes, pushes,
+opens the pull request, comments on Linear, and moves the issue to
+`Ready to Merge`.
+
 ## Ordered Ready Issues
 
 If multiple promoted issues are set to `Ready for Agent`, `agent start` keeps
@@ -43,5 +49,6 @@ Use `AGENT_IN_PROGRESS_STATE` or `--in-progress-state` only if the Linear
 workspace intentionally names the claim state differently. The template default
 is `In Progress`.
 
-If the runner exits before completing work, the CLI moves the claimed issue to
-`Blocked` and adds a comment with the failed command and exit code.
+If the runner exits before completing work and parent publish cannot recover a
+completed workspace, the CLI moves the claimed issue to `Blocked` and adds a
+comment with the failed command and exit code.
