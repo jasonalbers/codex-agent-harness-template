@@ -74,6 +74,8 @@ Confirm:
 - Deferred ideas are preserved.
 - Issues are small enough for one pull request.
 - Acceptance criteria and verification are clear.
+- Each wave backlog ends with a final local verification issue unless the wave
+  is explicitly documentation-only.
 - Unresolved questions are not hidden inside implementation tasks.
 
 ## 7. Promote To Linear

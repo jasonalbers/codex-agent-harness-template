@@ -20,6 +20,27 @@ An Idea Pack can be promoted when:
   - Verification.
   - Notes for agent.
 
+## Wave Backlog Rule
+
+Every wave backlog must include a final Linear issue that verifies the completed
+wave locally before the next wave starts.
+
+The final verification issue should be the last issue in the wave sequence and
+must require the agent to:
+
+- Run all product build, test, demo, and proof commands for that wave.
+- Run harness build, test, and repository validation commands when the harness
+  is present.
+- Inspect generated proof output and required artifacts.
+- Confirm the repo is clean except for expected ignored runtime/proof output.
+- Produce a clear PASS/FAIL report with commands run, proof paths, key summary
+  values, problems found, and a recommendation for whether the next wave can
+  begin.
+
+Do not promote a wave backlog that lacks this final verification issue unless
+the user explicitly says the wave is documentation-only and explains why a final
+verification issue would not add value.
+
 ## What Does Not Get Promoted
 
 - Raw brainstorm notes.
