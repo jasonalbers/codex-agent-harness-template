@@ -632,13 +632,31 @@ function shellArg(value: string): string {
   return /^[A-Za-z0-9._/-]+$/.test(value) ? value : shellQuote(value);
 }
 
+function agentServicePath(): string {
+  const home = homedir();
+  return [
+    join(home, ".local", "bin"),
+    join(home, ".bin"),
+    join(home, ".npm-global", "bin"),
+    "/usr/local/sbin",
+    "/usr/local/bin",
+    "/usr/sbin",
+    "/usr/bin",
+    "/sbin",
+    "/bin",
+    "/snap/bin",
+  ].join(":");
+}
+
 export function agentServiceCommand(spec: AgentServiceSpec): string {
   const runtimeDir = agentServiceRuntimeDir(spec.repoRoot);
   const lockPath = agentServiceLockPath(spec.repoRoot, spec.projectName);
+  const servicePath = agentServicePath();
   const inner = [
     "set -a",
     "source .agent-harness/.env",
     "set +a",
+    `export PATH=${shellQuote(servicePath)}:$PATH`,
     `AGENT_DRY_RUN=false SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1 AGENT_SERVICE_MODE=1 node .agent-harness/dist/cli.js agent start --project ${shellArg(spec.projectName)}`,
   ].join("; ");
   return [
@@ -662,6 +680,7 @@ export function renderAgentServiceUnit(spec: AgentServiceSpec): string {
     "Environment=AGENT_DRY_RUN=false",
     "Environment=SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1",
     "Environment=AGENT_SERVICE_MODE=1",
+    `Environment=PATH=${agentServicePath()}`,
     `ExecStart=/usr/bin/env bash -lc ${shellQuote(agentServiceCommand(spec))}`,
     "Restart=always",
     `RestartSec=${restartSec}`,
