@@ -564,6 +564,7 @@ test("renders repo-local agent systemd unit without secrets", () => {
   assert.match(unit, /AGENT_DRY_RUN=false/);
   assert.match(unit, /SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1/);
   assert.match(unit, /AGENT_SERVICE_MODE=1/);
+  assert.match(unit, /Environment=PATH=.*\.local\/bin/);
   assert.match(unit, /node \.agent-harness\/dist\/cli\.js agent start --project operator-os/);
   assert.match(unit, /\.agent-harness\/\.runtime\/agent-harness-operator-os\.lock/);
   assert.doesNotMatch(unit, /lin_api_/);
@@ -582,6 +583,7 @@ test("agent service command includes repo root, project name, and single-issue m
   assert.match(command, /AGENT_DRY_RUN=false/);
   assert.match(command, /SYMPHONY_AGENT_HARNESS_SINGLE_ISSUE=1/);
   assert.match(command, /AGENT_SERVICE_MODE=1/);
+  assert.match(command, /export PATH=.*\.local\/bin/);
   assert.match(command, /--project operator-os/);
 });
 
