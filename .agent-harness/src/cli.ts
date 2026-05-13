@@ -431,6 +431,12 @@ type ParentPublishResult = {
   message: string;
 };
 
+type SkippedParentPublishResolution = {
+  stateName: "Blocked" | "Done";
+  exitCode: number;
+  body: string;
+};
+
 type AutoMergeMethod = "merge" | "squash" | "rebase";
 
 export type AutoMergePullRequest = {
@@ -1639,6 +1645,53 @@ function parentPublishSkippedCommentBody(result: ParentPublishResult): string {
   ].join("\n");
 }
 
+export function isVerificationOnlyIssue(issue: Pick<AgentOrderIssue, "title" | "description">): boolean {
+  const title = issue.title.replace(/^\s*\[\d+\/\d+\]\s*/, "").trim();
+  if (/^verify\b.*\blocal(?:ly)?\b.*\bbefore\b.*\bplanning\b/i.test(title)) return true;
+  const description = issue.description || "";
+  return /final local .*verification/i.test(description) && /before .*planning/i.test(description);
+}
+
+function parentVerificationOnlyCompletedCommentBody(result: ParentPublishResult): string {
+  return [
+    "Verification-only agent run completed without publishable workspace changes.",
+    "",
+    result.message,
+    "",
+    "This issue is recognized as a final local verification issue. A clean no-diff result is expected, so the issue was moved to `Done` instead of being left in progress or blocked for missing code changes.",
+    "",
+    "Review the runner logs for the command output and proof details.",
+  ].join("\n");
+}
+
+export function resolveSkippedParentPublish(issue: AgentOrderIssue, result: ParentPublishResult, runCode: number): SkippedParentPublishResolution {
+  if (runCode !== 0) {
+    return {
+      stateName: "Blocked",
+      exitCode: 1,
+      body: [
+        agentBlockedCommentBody({ command: "symphony run", exitCode: runCode }),
+        "",
+        "Parent CLI publish also found no publishable workspace changes:",
+        "",
+        result.message,
+      ].join("\n"),
+    };
+  }
+  if (isVerificationOnlyIssue(issue)) {
+    return {
+      stateName: "Done",
+      exitCode: 0,
+      body: parentVerificationOnlyCompletedCommentBody(result),
+    };
+  }
+  return {
+    stateName: "Blocked",
+    exitCode: 1,
+    body: parentPublishSkippedCommentBody(result),
+  };
+}
+
 function parentPublishStateTransitionFailureCommentBody(targetState: string, error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return [
@@ -2414,8 +2467,13 @@ async function agentStart(flags: Record<string, string | boolean>): Promise<numb
       }
     }
     if (publishResult.ok && publishResult.skipped) {
-      await markIssueBlocked(apiKey, claim.selected, claim.stateIds, parentPublishSkippedCommentBody(publishResult));
-      return 1;
+      const resolution = resolveSkippedParentPublish(claim.selected, publishResult, runCode);
+      if (resolution.stateName === "Done") {
+        await markIssueDone(apiKey, claim.selected, claim.stateIds, resolution.body);
+      } else {
+        await markIssueBlocked(apiKey, claim.selected, claim.stateIds, resolution.body);
+      }
+      return resolution.exitCode;
     }
     if (runCode !== 0) {
       const body = publishResult.ok
