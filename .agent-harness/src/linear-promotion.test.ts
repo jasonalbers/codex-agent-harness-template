@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { agentBlockedCommentBody, agentBranchName, agentServiceCommand, agentServiceUnitName, codexAuthStatus, evaluateAutoMergeReadiness, githubAuthStatus, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderAgentServiceUnit, renderWorkflow, requiredLinearStateId, runAutoMergeFinalize, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, validateAgentServiceInstall, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
+import { agentBlockedCommentBody, agentBranchName, agentServiceCommand, agentServiceUnitName, codexAuthStatus, evaluateAutoMergeReadiness, githubAuthStatus, isVerificationOnlyIssue, linearIssueLabelsInput, patchSymphonyAppServerSource, patchSymphonyOrchestratorSource, publishPreflight, renderAgentServiceUnit, renderWorkflow, requiredLinearStateId, resolveSkippedParentPublish, runAutoMergeFinalize, runVerifiedLinearStateTransition, symphonyRunArgs, textFilesForValidation, validateAgentServiceInstall, verifyCreatedLinearIssue, verifyLinearStateTransitionResult } from "./cli.js";
 
 test("verifies promoted Linear issues are unarchived and in the target project", () => {
   const errors = verifyCreatedLinearIssue({
@@ -98,6 +98,75 @@ test("formats parent-published agent branch names", () => {
     identifier: "JAS-47",
     title: "Define Operator OS Wave 1 product boundary",
   }), "agent/jas-47-define-operator-os-wave-1-product-boundary");
+});
+
+test("detects final local verification issues as verification-only", () => {
+  assert.equal(isVerificationOnlyIssue({
+    title: "[11/11] Verify Wave 4 locally before Wave 5 planning",
+    description: null,
+  }), true);
+  assert.equal(isVerificationOnlyIssue({
+    title: "[09/11] Persist policy decisions and approval records",
+    description: "Implementation issue with tests.",
+  }), false);
+  assert.equal(isVerificationOnlyIssue({
+    title: "[13/13] Final wave check",
+    description: "Perform final local Wave 4 verification before Wave 5 planning starts.",
+  }), true);
+});
+
+test("clean no-diff verification issue resolves to Done instead of Blocked", () => {
+  const issue = {
+    id: "issue-id",
+    identifier: "JAS-116",
+    title: "[11/11] Verify Wave 4 locally before Wave 5 planning",
+    description: null,
+  };
+  const resolution = resolveSkippedParentPublish(issue, {
+    ok: true,
+    skipped: true,
+    message: "no publishable workspace changes found",
+  }, 0);
+
+  assert.equal(resolution.stateName, "Done");
+  assert.equal(resolution.exitCode, 0);
+  assert.match(resolution.body, /Verification-only agent run completed/);
+});
+
+test("clean no-diff implementation issue resolves to Blocked", () => {
+  const issue = {
+    id: "issue-id",
+    identifier: "JAS-114",
+    title: "[09/11] Persist policy decisions and approval records",
+    description: null,
+  };
+  const resolution = resolveSkippedParentPublish(issue, {
+    ok: true,
+    skipped: true,
+    message: "no publishable workspace changes found",
+  }, 0);
+
+  assert.equal(resolution.stateName, "Blocked");
+  assert.equal(resolution.exitCode, 1);
+  assert.match(resolution.body, /no publishable workspace changes were found/);
+});
+
+test("failed no-diff runner resolves to Blocked with runner exit details", () => {
+  const issue = {
+    id: "issue-id",
+    identifier: "JAS-116",
+    title: "[11/11] Verify Wave 4 locally before Wave 5 planning",
+    description: null,
+  };
+  const resolution = resolveSkippedParentPublish(issue, {
+    ok: true,
+    skipped: true,
+    message: "no publishable workspace changes found",
+  }, 2);
+
+  assert.equal(resolution.stateName, "Blocked");
+  assert.equal(resolution.exitCode, 1);
+  assert.match(resolution.body, /Exit code: `2`/);
 });
 
 test("verifies successful publish lifecycle state transition before logging success", () => {
